@@ -110,53 +110,56 @@ export default function TemplateListPage() {
           locale={{
             emptyText: '暂无模板，您可以在填写申请时保存为模板',
           }}
-          renderItem={(template) => (
-            <List.Item>
-              <Card
-                hoverable
-                actions={[
-                  <Button type="link" onClick={() => handleViewDetail(template)}>查看详情</Button>,
-                  <Button type="link" onClick={() => handleApply(template)}>
-                    <PlayCircleOutlined /> 套用
-                  </Button>,
-                  <Popconfirm
-                    title="确定删除此模板？"
-                    description="删除后无法恢复"
-                    onConfirm={() => handleDelete(template.id)}
-                    okText="确定"
-                    cancelText="取消"
-                  >
-                    <Button type="link" danger>
-                      <DeleteOutlined /> 删除
-                    </Button>
-                  </Popconfirm>,
-                ]}
-              >
-                <Card.Meta
-                  title={
-                    <Space>
-                      <PlusOutlined style={{ color: '#1890ff' }} />
-                      <span>{template.name}</span>
-                    </Space>
-                  }
-                  description={
-                    <div style={{ marginTop: 12 }}>
-                      <div style={{ marginBottom: 8 }}>
-                        <Tag color="blue">{template.matterName}</Tag>
+          renderItem={(template) => {
+            const itemMaterials = safeJSONParse<ApplicationMaterial[]>(template.materials, []);
+            return (
+              <List.Item>
+                <Card
+                  hoverable
+                  actions={[
+                    <Button type="link" onClick={() => handleViewDetail(template)}>查看详情</Button>,
+                    <Button type="link" onClick={() => handleApply(template)}>
+                      <PlayCircleOutlined /> 套用
+                    </Button>,
+                    <Popconfirm
+                      title="确定删除此模板？"
+                      description="删除后无法恢复"
+                      onConfirm={() => handleDelete(template.id)}
+                      okText="确定"
+                      cancelText="取消"
+                    >
+                      <Button type="link" danger>
+                        <DeleteOutlined /> 删除
+                      </Button>
+                    </Popconfirm>,
+                  ]}
+                >
+                  <Card.Meta
+                    title={
+                      <Space>
+                        <PlusOutlined style={{ color: '#1890ff' }} />
+                        <span>{template.name}</span>
+                      </Space>
+                    }
+                    description={
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ marginBottom: 8 }}>
+                          <Tag color="blue">{template.matterName}</Tag>
+                        </div>
+                        <p style={{ color: '#666', fontSize: 13, marginBottom: 8 }}>
+                          共 {itemMaterials.length} 项材料
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', color: '#999', fontSize: 12 }}>
+                          <FileTextOutlined style={{ marginRight: 4 }} />
+                          创建时间：{dayjs(template.createdAt).format('YYYY-MM-DD HH:mm')}
+                        </div>
                       </div>
-                      <p style={{ color: '#666', fontSize: 13, marginBottom: 8 }}>
-                        共 {materials.length} 项材料
-                      </p>
-                      <div style={{ display: 'flex', alignItems: 'center', color: '#999', fontSize: 12 }}>
-                        <FileTextOutlined style={{ marginRight: 4 }} />
-                        创建时间：{dayjs(template.createdAt).format('YYYY-MM-DD HH:mm')}
-                      </div>
-                    </div>
-                  }
-                />
-              </Card>
-            </List.Item>
-          )}
+                    }
+                  />
+                </Card>
+              </List.Item>
+            );
+          }}
         />
         <div style={{ marginTop: 24, textAlign: 'right' }}>
           <Pagination
