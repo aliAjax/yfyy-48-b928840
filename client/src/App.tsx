@@ -14,6 +14,7 @@ import UserManagePage from './pages/UserManagePage';
 import LogListPage from './pages/LogListPage';
 import GuidePage from './pages/GuidePage';
 import TemplateListPage from './pages/TemplateListPage';
+import StatisticsPage from './pages/StatisticsPage';
 import { Spin } from 'antd';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -133,6 +134,12 @@ function AppRoutes() {
         <Route path="logs" element={
           <RequireRole roles={['admin']}>
             <LogListPage />
+          </RequireRole>
+        } />
+
+        <Route path="statistics" element={
+          <RequireRole roles={['admin']}>
+            <StatisticsPage />
           </RequireRole>
         } />
         

@@ -13,6 +13,7 @@ import {
   SolutionOutlined,
   CopyOutlined,
   SelectOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -110,6 +111,11 @@ export default function MainLayout() {
         key: '/logs',
         icon: <HistoryOutlined />,
         label: '操作日志',
+      });
+      items.push({
+        key: '/statistics',
+        icon: <BarChartOutlined />,
+        label: '数据统计',
       });
     }
 

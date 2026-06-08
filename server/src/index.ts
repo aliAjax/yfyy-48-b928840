@@ -10,6 +10,7 @@ import logRoutes from './routes/logRoutes';
 import guideRoutes from './routes/guideRoutes';
 import notificationRoutes from './routes/notificationRoutes';
 import templateRoutes from './routes/templateRoutes';
+import statsRoutes from './routes/statsRoutes';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -27,6 +28,7 @@ app.use('/api/logs', logRoutes);
 app.use('/api/guide', guideRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/templates', templateRoutes);
+app.use('/api/stats', statsRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ success: true, message: '行政审批系统运行正常', timestamp: new Date().toISOString() });

@@ -168,3 +168,94 @@ export interface ApplicationTemplate {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface StatsFilterParams {
+  startDate?: string;
+  endDate?: string;
+  department?: string;
+  matterId?: string;
+  status?: string;
+}
+
+export interface StatsOverview {
+  totalCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  avgDuration: number;
+  approvalRate: number;
+  rejectionRate: number;
+}
+
+export interface DailyTrendItem {
+  date: string;
+  totalCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+}
+
+export interface MatterRankItem {
+  matterId: string;
+  matterName: string;
+  department: string;
+  totalCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  approvalRate: number;
+  avgDuration: number;
+}
+
+export interface DepartmentStatsItem {
+  department: string;
+  totalCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  approvalRate: number;
+}
+
+export interface StatusStatsItem {
+  status: string;
+  count: number;
+}
+
+export interface UserStatsItem {
+  userId: string;
+  userName: string;
+  role: string;
+  totalCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  avgDuration: number;
+}
+
+export interface WarningStats {
+  totalCount: number;
+  normalCount: number;
+  warningCount: number;
+  overdueCount: number;
+  warningRate: number;
+  overdueRate: number;
+}
+
+export interface MonthlyTrendItem {
+  month: string;
+  totalCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  avgDuration: number;
+}
+
+export interface SupplementStats {
+  supplementCount: number;
+  supplementRate: number;
+  avgSupplementCount: number;
+}
+
+export interface FullStatsOverview extends StatsOverview {
+  inProgressCount: number;
+  supplementCount: number;
+  warningCount: number;
+  overdueCount: number;
+  supplementRate: number;
+  warningRate: number;
+  overdueRate: number;
+}
