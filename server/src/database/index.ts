@@ -13,6 +13,50 @@ const db: DatabaseType = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+function migrateDatabase() {
+  const columns = db.prepare("PRAGMA table_info(material_files)").all() as { name: string }[];
+  const colNames = columns.map(c => c.name);
+  
+  if (!colNames.includes('version')) {
+    db.exec("ALTER TABLE material_files ADD COLUMN version INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!colNames.includes('is_current')) {
+    db.exec("ALTER TABLE material_files ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!colNames.includes('version_note')) {
+    db.exec("ALTER TABLE material_files ADD COLUMN version_note TEXT");
+  }
+  if (!colNames.includes('uploader_name')) {
+    db.exec("ALTER TABLE material_files ADD COLUMN uploader_name TEXT");
+  }
+
+  const groups = db.prepare(`
+    SELECT application_id, original_name
+    FROM material_files
+    GROUP BY application_id, original_name
+    HAVING COUNT(*) > 0
+  `).all() as { application_id: string; original_name: string }[];
+
+  const normalizeGroup = db.transaction((applicationId: string, originalName: string) => {
+    const files = db.prepare(`
+      SELECT id
+      FROM material_files
+      WHERE application_id = ? AND original_name = ?
+      ORDER BY created_at ASC, id ASC
+    `).all(applicationId, originalName) as { id: string }[];
+
+    files.forEach((file, index) => {
+      db.prepare(`
+        UPDATE material_files
+        SET version = ?, is_current = ?
+        WHERE id = ?
+      `).run(index + 1, index === files.length - 1 ? 1 : 0, file.id);
+    });
+  });
+
+  groups.forEach(group => normalizeGroup(group.application_id, group.original_name));
+}
+
 function initDatabase() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -73,6 +117,10 @@ function initDatabase() {
       file_size INTEGER NOT NULL,
       mime_type TEXT,
       uploaded_by TEXT NOT NULL,
+      uploader_name TEXT,
+      version INTEGER NOT NULL DEFAULT 1,
+      is_current INTEGER NOT NULL DEFAULT 1,
+      version_note TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE
     );
@@ -131,5 +179,6 @@ function initDatabase() {
 }
 
 initDatabase();
+migrateDatabase();
 
 export default db;

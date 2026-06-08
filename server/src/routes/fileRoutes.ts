@@ -4,7 +4,16 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { createFile, findFileById, listFilesByApplication, deleteFile } from '../dao/fileDao';
+import {
+  createFile,
+  findFileById,
+  listCurrentFilesByApplication,
+  listFileVersions,
+  deleteFile,
+  listAllFilesByApplication,
+  canDeleteFile,
+  getVersionCount,
+} from '../dao/fileDao';
 import { findApplicationById } from '../dao/applicationDao';
 
 const router = Router();
@@ -32,6 +41,13 @@ const upload = multer({
   },
 });
 
+function canViewApplication(applicantId: string, userId: string, userRole: string): boolean {
+  if (userRole === 'admin') return true;
+  if (userRole === 'window' || userRole === 'reviewer') return true;
+  if (userRole === 'applicant' && applicantId === userId) return true;
+  return false;
+}
+
 router.post('/upload/:applicationId', authMiddleware, upload.single('file'), (req: AuthRequest, res) => {
   if (!req.user) return;
   if (!req.file) {
@@ -46,10 +62,17 @@ router.post('/upload/:applicationId', authMiddleware, upload.single('file'), (re
     return;
   }
 
-  if (req.user.role === 'applicant' && app.applicantId !== req.user.id) {
-    res.status(403).json({ success: false, message: '无权上传' });
+  if (req.user.role !== 'applicant' || app.applicantId !== req.user.id) {
+    res.status(403).json({ success: false, message: '无权上传材料' });
     return;
   }
+
+  if (app.status !== 'draft' && app.status !== 'supplement') {
+    res.status(403).json({ success: false, message: '当前状态下无法上传材料，仅草稿或补正状态可上传' });
+    return;
+  }
+
+  const versionNote = req.body.versionNote as string | undefined;
 
   const file = createFile({
     applicationId,
@@ -59,9 +82,16 @@ router.post('/upload/:applicationId', authMiddleware, upload.single('file'), (re
     fileSize: req.file.size,
     mimeType: req.file.mimetype,
     uploadedBy: req.user.id,
+    versionNote,
   });
 
-  res.json({ success: true, data: file, message: '上传成功' });
+  const versionCount = getVersionCount(applicationId, req.file.originalname);
+
+  res.json({
+    success: true,
+    data: file,
+    message: versionCount > 1 ? `上传成功，已创建 v${file.version} 新版本` : '上传成功',
+  });
 });
 
 router.get('/application/:applicationId', authMiddleware, (req: AuthRequest, res) => {
@@ -74,13 +104,58 @@ router.get('/application/:applicationId', authMiddleware, (req: AuthRequest, res
     return;
   }
 
-  if (req.user.role === 'applicant' && app.applicantId !== req.user.id) {
+  if (!canViewApplication(app.applicantId, req.user.id, req.user.role)) {
     res.status(403).json({ success: false, message: '无权查看' });
     return;
   }
 
-  const files = listFilesByApplication(applicationId);
+  const files = listCurrentFilesByApplication(applicationId);
   res.json({ success: true, data: files });
+});
+
+router.get('/application/:applicationId/all', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const { applicationId } = req.params;
+  const app = findApplicationById(applicationId);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (!canViewApplication(app.applicantId, req.user.id, req.user.role)) {
+    res.status(403).json({ success: false, message: '无权查看' });
+    return;
+  }
+
+  const files = listAllFilesByApplication(applicationId);
+  res.json({ success: true, data: files });
+});
+
+router.get('/versions/:applicationId', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const { applicationId } = req.params;
+  const { originalName } = req.query;
+
+  const app = findApplicationById(applicationId);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (!canViewApplication(app.applicantId, req.user.id, req.user.role)) {
+    res.status(403).json({ success: false, message: '无权查看' });
+    return;
+  }
+
+  if (!originalName || typeof originalName !== 'string') {
+    res.json({ success: false, message: '缺少材料名称参数' });
+    return;
+  }
+
+  const versions = listFileVersions(applicationId, originalName);
+  res.json({ success: true, data: versions });
 });
 
 router.get('/download/:id', authMiddleware, (req: AuthRequest, res) => {
@@ -98,7 +173,7 @@ router.get('/download/:id', authMiddleware, (req: AuthRequest, res) => {
     return;
   }
 
-  if (req.user.role === 'applicant' && app.applicantId !== req.user.id) {
+  if (!canViewApplication(app.applicantId, req.user.id, req.user.role)) {
     res.status(403).json({ success: false, message: '无权下载' });
     return;
   }
@@ -108,7 +183,14 @@ router.get('/download/:id', authMiddleware, (req: AuthRequest, res) => {
     return;
   }
 
-  res.download(file.filePath, file.originalName);
+  let downloadName = file.originalName;
+  if (!file.isCurrent) {
+    const ext = path.extname(file.originalName);
+    const baseName = path.basename(file.originalName, ext);
+    downloadName = `${baseName}_v${file.version}${ext}`;
+  }
+
+  res.download(file.filePath, downloadName);
 });
 
 router.delete('/:id', authMiddleware, (req: AuthRequest, res) => {
@@ -126,8 +208,20 @@ router.delete('/:id', authMiddleware, (req: AuthRequest, res) => {
     return;
   }
 
-  if (req.user.role === 'applicant' && app.applicantId !== req.user.id) {
-    res.status(403).json({ success: false, message: '无权删除' });
+  if (req.user.role !== 'applicant' || app.applicantId !== req.user.id) {
+    res.status(403).json({ success: false, message: '只能删除本人申请的材料' });
+    return;
+  }
+
+  const { canDelete, reason } = canDeleteFile(
+    file.id,
+    req.user.id,
+    req.user.role,
+    app.status
+  );
+
+  if (!canDelete) {
+    res.status(403).json({ success: false, message: reason || '无权删除' });
     return;
   }
 

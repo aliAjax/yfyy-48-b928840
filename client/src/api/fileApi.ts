@@ -22,6 +22,16 @@ export function listFiles(applicationId: string): Promise<ApiResponse<MaterialFi
   return request.get(`/files/application/${applicationId}`);
 }
 
+export function listAllFiles(applicationId: string): Promise<ApiResponse<MaterialFile[]>> {
+  return request.get(`/files/application/${applicationId}/all`);
+}
+
+export function listFileVersions(applicationId: string, originalName: string): Promise<ApiResponse<MaterialFile[]>> {
+  return request.get(`/files/versions/${applicationId}`, {
+    params: { originalName },
+  });
+}
+
 export function getDownloadUrl(fileId: string): string {
   return `/api/files/download/${fileId}`;
 }

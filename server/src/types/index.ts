@@ -92,6 +92,10 @@ export interface MaterialFile {
   fileSize: number;
   mimeType?: string;
   uploadedBy: string;
+  uploadedByName?: string;
+  version: number;
+  isCurrent: boolean;
+  versionNote?: string;
   createdAt: string;
 }
 

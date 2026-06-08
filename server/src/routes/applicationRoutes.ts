@@ -9,7 +9,7 @@ import {
 import { findMatterById } from '../dao/matterDao';
 import { findUserById, listUsers } from '../dao/userDao';
 import { createLog, listLogsByApplication } from '../dao/logDao';
-import { listFilesByApplication } from '../dao/fileDao';
+import { listCurrentFilesByApplication } from '../dao/fileDao';
 import { createNotification } from '../dao/notificationDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
 import { now, toJSON, calculateWarningStatus, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep } from '../utils/helpers';
@@ -20,7 +20,7 @@ const router = Router();
 function enrichApplication(app: any) {
   const matter = findMatterById(app.matterId);
   const applicant = findUserById(app.applicantId);
-  const files = listFilesByApplication(app.id);
+  const files = listCurrentFilesByApplication(app.id);
   
   const { warningStatus, remainingDays } = calculateWarningStatus(
     app.acceptTime,

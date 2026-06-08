@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Card, Descriptions, Tag, Timeline, Button, Space, List, Modal, message, Input, Upload, Steps, Tooltip } from 'antd';
-import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, UserOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Tag, Timeline, Button, Space, List, Modal, message, Input, Upload, Steps, Tooltip, Table, Popconfirm } from 'antd';
+import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, UserOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, getApplicationLogs, submitApplication, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication, reviewApplication } from '../api/applicationApi';
 import { warningLabels, warningColors, parseFlowConfig, roleLabels, DEFAULT_FLOW_STEPS, canOperateStep } from '../utils/common';
@@ -9,7 +9,7 @@ import { Application, OperationLog, MaterialFile, ApplicationStatus, Application
 import { statusLabels, statusColors, formatFileSize, safeJSONParse, actionLabels } from '../utils/common';
 import { useAuth } from '../context/AuthContext';
 import dayjs from 'dayjs';
-import { getDownloadUrl, uploadFile, deleteFile } from '../api/fileApi';
+import { getDownloadUrl, uploadFile, deleteFile, listFileVersions } from '../api/fileApi';
 
 export default function ApplicationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -19,6 +19,10 @@ export default function ApplicationDetailPage() {
   const [logs, setLogs] = useState<OperationLog[]>([]);
   const [matter, setMatter] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [versionModalVisible, setVersionModalVisible] = useState(false);
+  const [versionList, setVersionList] = useState<MaterialFile[]>([]);
+  const [currentVersionFile, setCurrentVersionFile] = useState<MaterialFile | null>(null);
+  const [versionLoading, setVersionLoading] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -176,8 +180,44 @@ export default function ApplicationDetailPage() {
       if (res.success) {
         message.success('删除成功');
         loadApplication();
+        if (versionModalVisible && currentVersionFile) {
+          loadVersionHistory(currentVersionFile.originalName);
+        }
       }
     } catch {}
+  };
+
+  const handleViewVersions = async (file: MaterialFile) => {
+    setCurrentVersionFile(file);
+    setVersionModalVisible(true);
+    await loadVersionHistory(file.originalName);
+  };
+
+  const loadVersionHistory = async (originalName: string) => {
+    setVersionLoading(true);
+    try {
+      const res = await listFileVersions(id!, originalName);
+      if (res.success) {
+        setVersionList(res.data || []);
+      }
+    } catch {
+    } finally {
+      setVersionLoading(false);
+    }
+  };
+
+  const canDeleteFile = (file: MaterialFile): { canDelete: boolean; reason?: string } => {
+    if (!application || !user) return { canDelete: false, reason: '无权限' };
+    if (user.role === 'applicant') {
+      if (application.applicantId !== user.id) return { canDelete: false, reason: '只能删除本人申请的材料' };
+      if (application.status !== 'draft' && application.status !== 'supplement') {
+        return { canDelete: false, reason: '仅草稿或补正状态可删除' };
+      }
+      if (file.uploadedBy !== user.id) return { canDelete: false, reason: '只能删除本人上传的材料' };
+      if (!file.isCurrent) return { canDelete: false, reason: '只能删除最新版本' };
+      return { canDelete: true };
+    }
+    return { canDelete: false, reason: '无删除权限' };
   };
 
   const flowSteps = useMemo((): FlowStep[] => {
@@ -492,7 +532,12 @@ export default function ApplicationDetailPage() {
       </Card>
 
       <Card
-        title="上传材料"
+        title={
+          <Space>
+            <span>上传材料</span>
+            <Tag color="blue">共 {application?.files?.length || 0} 份当前版本</Tag>
+          </Space>
+        }
         style={{ marginBottom: 16 }}
         extra={
           (user?.role === 'applicant' && (application?.status === 'draft' || application?.status === 'supplement')) && (
@@ -500,38 +545,235 @@ export default function ApplicationDetailPage() {
               customRequest={({ file }) => handleUpload(file as File)}
               showUploadList={false}
             >
-              <Button icon={<UploadOutlined />}>上传材料</Button>
+              <Button type="primary" icon={<UploadOutlined />}>上传材料</Button>
             </Upload>
           )
         }
       >
         <List
           dataSource={application?.files || []}
-          renderItem={(item: MaterialFile) => (
-            <List.Item
-              actions={[
-                <Button type="link" icon={<DownloadOutlined />} onClick={() => window.open(getDownloadUrl(item.id))}>
-                  下载
-                </Button>,
-                (user?.role === 'applicant' && (application?.status === 'draft' || application?.status === 'supplement')) && (
-                  <Button type="link" danger icon={<DeleteOutlined />} onClick={() => handleDeleteFile(item.id)}>
-                    删除
-                  </Button>
-                ),
-              ].filter(Boolean) as any}
-            >
-              <List.Item.Meta
-                avatar={<FileTextOutlined style={{ fontSize: 24, color: '#1890ff' }} />}
-                title={item.originalName}
-                description={`${formatFileSize(item.fileSize)} · ${dayjs(item.createdAt).format('YYYY-MM-DD HH:mm')}`}
-              />
-            </List.Item>
-          )}
+          renderItem={(item: MaterialFile) => {
+            const { canDelete, reason } = canDeleteFile(item);
+            return (
+              <List.Item
+                style={{
+                  padding: '12px 16px',
+                  background: item.isCurrent ? '#f6ffed' : '#fff',
+                  borderLeft: item.isCurrent ? '3px solid #52c41a' : '3px solid #d9d9d9',
+                  marginBottom: 8,
+                  borderRadius: 4,
+                }}
+                actions={[
+                  <Button
+                    key="history"
+                    type="link"
+                    size="small"
+                    icon={<HistoryOutlined />}
+                    onClick={() => handleViewVersions(item)}
+                  >
+                    版本历史
+                  </Button>,
+                  <Button
+                    key="download"
+                    type="link"
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    onClick={() => window.open(getDownloadUrl(item.id))}
+                  >
+                    {item.isCurrent ? '下载当前版' : '下载'}
+                  </Button>,
+                  canDelete ? (
+                    <Tooltip title="删除此版本">
+                      <Button
+                        key="delete"
+                        type="link"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={() => {
+                          Modal.confirm({
+                            title: '确认删除',
+                            content: (
+                              <div>
+                                <p>确定要删除 <strong>{item.originalName}</strong> 的 <strong>v{item.version}</strong> 版本吗？</p>
+                                <p style={{ color: '#faad14', fontSize: 12, marginTop: 8 }}>
+                                  注意：删除最新版本后，系统将自动回退到上一版本作为当前版本。
+                                </p>
+                              </div>
+                            ),
+                            okText: '确认删除',
+                            okButtonProps: { danger: true },
+                            onOk: () => handleDeleteFile(item.id),
+                          });
+                        }}
+                      >
+                        删除
+                      </Button>
+                    </Tooltip>
+                  ) : !item.isCurrent ? (
+                    <Tooltip title={reason}>
+                      <Button key="delete" type="link" size="small" disabled style={{ color: '#bfbfbf' }}>
+                        删除
+                      </Button>
+                    </Tooltip>
+                  ) : null,
+                ].filter(Boolean) as any}
+              >
+                <List.Item.Meta
+                  avatar={<FileTextOutlined style={{ fontSize: 28, color: item.isCurrent ? '#52c41a' : '#1890ff' }} />}
+                  title={
+                    <Space>
+                      <strong style={{ fontSize: 14 }}>{item.originalName}</strong>
+                      <Tag color={item.isCurrent ? 'green' : 'default'} style={{ fontWeight: 'bold' }}>
+                        v{item.version}
+                      </Tag>
+                      {item.isCurrent && (
+                        <Tag color="success" icon={<CheckCircleOutlined />}>
+                          当前版本
+                        </Tag>
+                      )}
+                    </Space>
+                  }
+                  description={
+                    <div style={{ color: '#666' }}>
+                      <Space size={16}>
+                        <span>文件大小：{formatFileSize(item.fileSize)}</span>
+                        <span>上传时间：{dayjs(item.createdAt).format('YYYY-MM-DD HH:mm')}</span>
+                        {item.uploadedByName && <span>上传人：{item.uploadedByName}</span>}
+                      </Space>
+                      {item.versionNote && (
+                        <div style={{ marginTop: 6, padding: '6px 10px', background: '#f5f5f5', borderRadius: 4, fontSize: 12 }}>
+                          版本说明：{item.versionNote}
+                        </div>
+                      )}
+                    </div>
+                  }
+                />
+              </List.Item>
+            );
+          }}
         />
         {(!application?.files || application.files.length === 0) && (
-          <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>暂无上传材料</div>
+          <div style={{ color: '#999', textAlign: 'center', padding: 40 }}>暂无上传材料</div>
         )}
       </Card>
+
+      <Modal
+        title={
+          <Space>
+            <span>{currentVersionFile?.originalName} - 版本历史</span>
+            <Tag color="blue">共 {versionList.length} 个版本</Tag>
+          </Space>
+        }
+        open={versionModalVisible}
+        onCancel={() => setVersionModalVisible(false)}
+        footer={null}
+        width={800}
+      >
+        <Table
+          dataSource={versionList}
+          rowKey="id"
+          loading={versionLoading}
+          pagination={false}
+          size="middle"
+          columns={[
+            {
+              title: '版本',
+              dataIndex: 'version',
+              key: 'version',
+              width: 90,
+              render: (version: number, record: MaterialFile) => (
+                <div style={{ textAlign: 'center' }}>
+                  <Tag color={record.isCurrent ? 'green' : 'default'} style={{ fontWeight: 'bold', fontSize: 14 }}>
+                    v{version}
+                  </Tag>
+                  {record.isCurrent && (
+                    <div style={{ color: '#52c41a', fontSize: 12, marginTop: 2, fontWeight: 'bold' }}>
+                      ✓ 当前版本
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+            {
+              title: '文件大小',
+              dataIndex: 'fileSize',
+              key: 'fileSize',
+              width: 90,
+              render: (size: number) => formatFileSize(size),
+            },
+            {
+              title: '上传人',
+              dataIndex: 'uploadedByName',
+              key: 'uploadedByName',
+              width: 100,
+              render: (name?: string) => name || '-',
+            },
+            {
+              title: '上传时间',
+              dataIndex: 'createdAt',
+              key: 'createdAt',
+              width: 160,
+              render: (time: string) => dayjs(time).format('YYYY-MM-DD HH:mm:ss'),
+            },
+            {
+              title: '版本说明',
+              dataIndex: 'versionNote',
+              key: 'versionNote',
+              ellipsis: true,
+              render: (note?: string) => note || <span style={{ color: '#bfbfbf' }}>无</span>,
+            },
+            {
+              title: '操作',
+              key: 'action',
+              width: 130,
+              fixed: 'right',
+              render: (_, record: MaterialFile) => {
+                const { canDelete, reason } = canDeleteFile(record);
+                return (
+                  <Space size={4}>
+                    <Button
+                      type={record.isCurrent ? 'primary' : 'link'}
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      onClick={() => window.open(getDownloadUrl(record.id))}
+                    >
+                      {record.isCurrent ? '下载当前' : '下载'}
+                    </Button>
+                    {canDelete ? (
+                      <Popconfirm
+                        title="确认删除此版本？"
+                        description={
+                          <div>
+                            <p>删除后将自动回退到上一版本作为当前版本。</p>
+                            <p style={{ color: '#faad14', fontSize: 12 }}>此操作不可撤销。</p>
+                          </div>
+                        }
+                        okText="确认删除"
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() => handleDeleteFile(record.id)}
+                      >
+                        <Button type="link" danger size="small" icon={<DeleteOutlined />}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    ) : (
+                      <Tooltip title={reason}>
+                        <Button type="link" size="small" disabled style={{ color: '#bfbfbf' }}>
+                          删除
+                        </Button>
+                      </Tooltip>
+                    )}
+                  </Space>
+                );
+              },
+            },
+          ]}
+        />
+        {versionList.length === 0 && !versionLoading && (
+          <div style={{ color: '#999', textAlign: 'center', padding: 40 }}>暂无版本记录</div>
+        )}
+      </Modal>
 
       <Card title="办理进度">
         <Timeline
