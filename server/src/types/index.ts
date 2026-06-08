@@ -94,6 +94,28 @@ export interface OperationLog {
   createdAt: string;
 }
 
+export type NotificationType = 
+  | 'submit' 
+  | 'accept' 
+  | 'supplement' 
+  | 'reject' 
+  | 'review_pass'
+  | 'review_reject'
+  | 'send_review'
+  | 'complete';
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  content?: string;
+  applicationId?: string;
+  isRead: boolean;
+  createdAt: string;
+  readAt?: string;
+}
+
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;

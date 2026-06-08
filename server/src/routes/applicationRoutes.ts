@@ -7,9 +7,10 @@ import {
   findApplicationByNo 
 } from '../dao/applicationDao';
 import { findMatterById } from '../dao/matterDao';
-import { findUserById } from '../dao/userDao';
+import { findUserById, listUsers } from '../dao/userDao';
 import { createLog, listLogsByApplication } from '../dao/logDao';
 import { listFilesByApplication } from '../dao/fileDao';
+import { createNotification } from '../dao/notificationDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
 import { now, toJSON } from '../utils/helpers';
 import { ApplicationStatus } from '../types';
@@ -142,6 +143,18 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
     newStatus: 'submitted',
   });
 
+  const matter = findMatterById(app.matterId);
+  const windowUsers = listUsers({ role: 'window' }).users;
+  windowUsers.forEach(u => {
+    createNotification({
+      userId: u.id,
+      type: 'submit',
+      title: '新申请待受理',
+      content: `申请人 ${req.user.name} 提交了「${matter?.name || ''}」申请，请及时受理。`,
+      applicationId: app.id,
+    });
+  });
+
   res.json({ success: true, data: enrichApplication(app), message: '提交成功' });
 });
 
@@ -176,6 +189,15 @@ router.post('/:id/accept', authMiddleware, requireRole('window'), (req: AuthRequ
     newStatus: 'accepted',
   });
 
+  const matter = findMatterById(app.matterId);
+  createNotification({
+    userId: app.applicantId,
+    type: 'accept',
+    title: '申请已受理',
+    content: `您的「${matter?.name || ''}」申请已被窗口受理，正在处理中。`,
+    applicationId: app.id,
+  });
+
   res.json({ success: true, data: enrichApplication(app), message: '受理成功' });
 });
 
@@ -207,6 +229,15 @@ router.post('/:id/supplement', authMiddleware, requireRole('window'), (req: Auth
     description: `要求补正材料：${reason || ''}`,
     oldStatus,
     newStatus: 'supplement',
+  });
+
+  const matter = findMatterById(app.matterId);
+  createNotification({
+    userId: app.applicantId,
+    type: 'supplement',
+    title: '申请需补正材料',
+    content: `您的「${matter?.name || ''}」申请需要补正材料：${reason || ''}`,
+    applicationId: app.id,
   });
 
   res.json({ success: true, data: enrichApplication(app), message: '已发送补正通知' });
@@ -249,6 +280,15 @@ router.post('/:id/reject', authMiddleware, (req: AuthRequest, res) => {
     newStatus: 'rejected',
   });
 
+  const matter = findMatterById(app.matterId);
+  createNotification({
+    userId: app.applicantId,
+    type: 'reject',
+    title: '申请被退回',
+    content: `您的「${matter?.name || ''}」申请被退回，原因：${reason || ''}`,
+    applicationId: app.id,
+  });
+
   res.json({ success: true, data: enrichApplication(app), message: '已退回申请' });
 });
 
@@ -279,6 +319,18 @@ router.post('/:id/send-review', authMiddleware, requireRole('window'), (req: Aut
     description: '材料审核通过，送交审核人员',
     oldStatus,
     newStatus: 'reviewing',
+  });
+
+  const matter = findMatterById(app.matterId);
+  const reviewerUsers = listUsers({ role: 'reviewer' }).users;
+  reviewerUsers.forEach(u => {
+    createNotification({
+      userId: u.id,
+      type: 'send_review',
+      title: '新申请待审核',
+      content: `窗口已将「${matter?.name || ''}」申请送交审核，请及时处理。`,
+      applicationId: app.id,
+    });
   });
 
   res.json({ success: true, data: enrichApplication(app), message: '已送审' });
@@ -326,6 +378,35 @@ router.post('/:id/review', authMiddleware, requireRole('reviewer'), (req: AuthRe
     newStatus: pass ? 'approved' : 'rejected',
   });
 
+  const matter = findMatterById(app.matterId);
+  if (pass) {
+    createNotification({
+      userId: app.applicantId,
+      type: 'review_pass',
+      title: '审核通过',
+      content: `您的「${matter?.name || ''}」申请已审核通过，等待办结。`,
+      applicationId: app.id,
+    });
+    const windowUsers = listUsers({ role: 'window' }).users;
+    windowUsers.forEach(u => {
+      createNotification({
+        userId: u.id,
+        type: 'review_pass',
+        title: '申请审核通过待办结',
+        content: `「${matter?.name || ''}」申请已审核通过，请及时办结。`,
+        applicationId: app.id,
+      });
+    });
+  } else {
+    createNotification({
+      userId: app.applicantId,
+      type: 'review_reject',
+      title: '审核不通过',
+      content: `您的「${matter?.name || ''}」申请审核不通过，原因：${opinion || ''}`,
+      applicationId: app.id,
+    });
+  }
+
   res.json({ success: true, data: enrichApplication(app), message: '审核完成' });
 });
 
@@ -357,6 +438,15 @@ router.post('/:id/complete', authMiddleware, requireRole('window'), (req: AuthRe
     description: '申请已办结',
     oldStatus,
     newStatus: 'completed',
+  });
+
+  const matter = findMatterById(app.matterId);
+  createNotification({
+    userId: app.applicantId,
+    type: 'complete',
+    title: '申请已办结',
+    content: `您的「${matter?.name || ''}」申请已办结，请前往办理结果。`,
+    applicationId: app.id,
   });
 
   res.json({ success: true, data: enrichApplication(app), message: '办结成功' });

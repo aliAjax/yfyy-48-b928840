@@ -15,6 +15,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { roleLabels } from '../utils/common';
+import NotificationPanel from '../components/NotificationPanel';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -162,12 +163,15 @@ export default function MainLayout() {
           <Text strong style={{ fontSize: 16 }}>
             行政审批事项办理系统
           </Text>
-          <Dropdown menu={userMenu} placement="bottomRight">
-            <Space style={{ cursor: 'pointer' }}>
-              <Avatar icon={<UserOutlined />} />
-              <span>{user?.name}</span>
-            </Space>
-          </Dropdown>
+          <Space size={16}>
+            <NotificationPanel />
+            <Dropdown menu={userMenu} placement="bottomRight">
+              <Space style={{ cursor: 'pointer' }}>
+                <Avatar icon={<UserOutlined />} />
+                <span>{user?.name}</span>
+              </Space>
+            </Dropdown>
+          </Space>
         </Header>
         <Content style={{ margin: '24px', padding: 24, background: '#fff', borderRadius: 8, minHeight: 'calc(100vh - 112px)' }}>
           <Outlet />

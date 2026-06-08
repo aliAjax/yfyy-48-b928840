@@ -90,11 +90,27 @@ function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT,
+      application_id TEXT,
+      is_read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      read_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE SET NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_applications_applicant ON applications(applicant_id);
     CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
     CREATE INDEX IF NOT EXISTS idx_applications_matter ON applications(matter_id);
     CREATE INDEX IF NOT EXISTS idx_logs_application ON operation_logs(application_id);
     CREATE INDEX IF NOT EXISTS idx_files_application ON material_files(application_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read);
   `);
 }
 
