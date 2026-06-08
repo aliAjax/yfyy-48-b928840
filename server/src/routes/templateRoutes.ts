@@ -136,6 +136,37 @@ router.delete('/:id', authMiddleware, requireRole('applicant'), (req: AuthReques
   res.json({ success, message: success ? '删除成功' : '删除失败' });
 });
 
+router.post('/:id/copy', authMiddleware, requireRole('applicant'), (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const template = findTemplateById(req.params.id);
+  if (!template) {
+    res.json({ success: false, message: '模板不存在' });
+    return;
+  }
+
+  if (template.userId !== req.user.id) {
+    res.status(403).json({ success: false, message: '无权操作此模板' });
+    return;
+  }
+
+  const matter = findMatterById(template.matterId);
+  if (!matter || matter.status !== 'active') {
+    res.json({ success: false, message: '事项不存在或未启用' });
+    return;
+  }
+
+  const copiedTemplate = createTemplate({
+    name: `${template.name} - 副本`,
+    matterId: template.matterId,
+    userId: req.user.id,
+    basicInfo: template.basicInfo,
+    materials: template.materials,
+  });
+
+  res.json({ success: true, data: enrichTemplate(copiedTemplate), message: '模板复制成功' });
+});
+
 router.post('/:id/apply', authMiddleware, requireRole('applicant'), (req: AuthRequest, res) => {
   if (!req.user) return;
 

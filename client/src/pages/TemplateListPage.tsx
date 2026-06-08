@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, List, Tag, Button, Input, Space, Pagination, Modal, Descriptions, message, Popconfirm } from 'antd';
-import { SearchOutlined, FileTextOutlined, DeleteOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons';
-import { listTemplates, deleteTemplate, applyTemplate } from '../api/templateApi';
+import { SearchOutlined, FileTextOutlined, DeleteOutlined, PlayCircleOutlined, PlusOutlined, EditOutlined, CopyOutlined } from '@ant-design/icons';
+import { listTemplates, deleteTemplate, applyTemplate, updateTemplate, copyTemplate } from '../api/templateApi';
 import { ApplicationTemplate, ApplicationMaterial } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { safeJSONParse } from '../utils/common';
@@ -19,6 +19,11 @@ export default function TemplateListPage() {
   const [selectedTemplate, setSelectedTemplate] = useState<ApplicationTemplate | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameVisible, setRenameVisible] = useState(false);
+  const [renameTemplate, setRenameTemplate] = useState<ApplicationTemplate | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [copyingId, setCopyingId] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
@@ -53,6 +58,35 @@ export default function TemplateListPage() {
     setDetailVisible(true);
   };
 
+  const handleOpenRename = (template: ApplicationTemplate) => {
+    setRenameTemplate(template);
+    setRenameName(template.name);
+    setRenameVisible(true);
+  };
+
+  const handleConfirmRename = async () => {
+    const name = renameName.trim();
+    if (!name) {
+      message.warning('请输入模板名称');
+      return;
+    }
+    if (!renameTemplate) return;
+
+    try {
+      setRenaming(true);
+      const res = await updateTemplate(renameTemplate.id, { name });
+      if (res.success) {
+        message.success('重命名成功');
+        setRenameVisible(false);
+        setRenameTemplate(null);
+        setRenameName('');
+        loadTemplates();
+      }
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     try {
       setDeleting(true);
@@ -75,6 +109,19 @@ export default function TemplateListPage() {
       }
     } catch (error) {
       // error handled by interceptor
+    }
+  };
+
+  const handleCopy = async (template: ApplicationTemplate) => {
+    try {
+      setCopyingId(template.id);
+      const res = await copyTemplate(template.id);
+      if (res.success) {
+        message.success('模板复制成功');
+        loadTemplates();
+      }
+    } finally {
+      setCopyingId(null);
     }
   };
 
@@ -118,6 +165,12 @@ export default function TemplateListPage() {
                   hoverable
                   actions={[
                     <Button type="link" onClick={() => handleViewDetail(template)}>查看详情</Button>,
+                    <Button type="link" onClick={() => handleOpenRename(template)}>
+                      <EditOutlined /> 重命名
+                    </Button>,
+                    <Button type="link" loading={copyingId === template.id} onClick={() => handleCopy(template)}>
+                      <CopyOutlined /> 复制
+                    </Button>,
                     <Button type="link" onClick={() => handleApply(template)}>
                       <PlayCircleOutlined /> 套用
                     </Button>,
@@ -225,6 +278,29 @@ export default function TemplateListPage() {
             </Descriptions.Item>
           </Descriptions>
         )}
+      </Modal>
+
+      <Modal
+        title="重命名模板"
+        open={renameVisible}
+        onCancel={() => {
+          setRenameVisible(false);
+          setRenameTemplate(null);
+          setRenameName('');
+        }}
+        onOk={handleConfirmRename}
+        confirmLoading={renaming}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Input
+          placeholder="请输入模板名称"
+          value={renameName}
+          maxLength={50}
+          showCount
+          onChange={(e) => setRenameName(e.target.value)}
+          onPressEnter={handleConfirmRename}
+        />
       </Modal>
     </div>
   );
