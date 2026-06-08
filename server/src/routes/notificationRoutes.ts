@@ -6,8 +6,31 @@ import {
   markAsRead, 
   markAllAsRead 
 } from '../dao/notificationDao';
+import { NotificationType } from '../types';
 
 const router = Router();
+
+const notificationTypes: NotificationType[] = [
+  'submit',
+  'accept',
+  'supplement',
+  'reject',
+  'review_pass',
+  'review_reject',
+  'send_review',
+  'complete',
+];
+
+function parseTypes(type?: unknown): NotificationType[] | undefined {
+  if (typeof type !== 'string') return undefined;
+
+  const types = type
+    .split(',')
+    .map(item => item.trim())
+    .filter((item): item is NotificationType => notificationTypes.includes(item as NotificationType));
+
+  return types.length > 0 ? types : undefined;
+}
 
 router.get('/unread-count', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
@@ -19,10 +42,11 @@ router.get('/unread-count', authMiddleware, (req: AuthRequest, res) => {
 router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 
-  const { page = 1, pageSize = 10, isRead } = req.query;
+  const { page = 1, pageSize = 10, isRead, type } = req.query;
 
   const result = listNotifications({
     userId: req.user.id,
+    types: parseTypes(type),
     isRead: isRead !== undefined ? isRead === 'true' : undefined,
     page: Number(page),
     pageSize: Number(pageSize),
@@ -49,7 +73,7 @@ router.put('/:id/read', authMiddleware, (req: AuthRequest, res) => {
 router.put('/read-all', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 
-  const count = markAllAsRead(req.user.id);
+  const count = markAllAsRead(req.user.id, parseTypes(req.body?.type));
   res.json({ success: true, data: { count }, message: `已标记 ${count} 条为已读` });
 });
 

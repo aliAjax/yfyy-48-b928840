@@ -1,11 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
-import { Badge, Popover, List, Button, Typography, Space, Empty, Spin } from 'antd';
+import { Badge, Popover, List, Button, Typography, Space, Empty, Spin, Tabs, Switch } from 'antd';
 import { BellOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { Notification } from '../types';
+import { Notification, NotificationType } from '../types';
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead } from '../api/notificationApi';
 
 const { Text, Paragraph } = Typography;
+
+type NotificationTypeFilter = 'all' | 'submit' | 'accept' | 'supplement' | 'reject' | 'review' | 'complete';
+
+const typeFilterOptions: Array<{ key: NotificationTypeFilter; label: string; types?: NotificationType[] }> = [
+  { key: 'all', label: '全部' },
+  { key: 'submit', label: '提交', types: ['submit'] },
+  { key: 'accept', label: '受理', types: ['accept'] },
+  { key: 'supplement', label: '补正', types: ['supplement'] },
+  { key: 'reject', label: '退回', types: ['reject'] },
+  { key: 'review', label: '审核', types: ['review_pass', 'review_reject', 'send_review'] },
+  { key: 'complete', label: '办结', types: ['complete'] },
+];
 
 export default function NotificationPanel() {
   const [open, setOpen] = useState(false);
@@ -14,9 +26,14 @@ export default function NotificationPanel() {
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [typeFilter, setTypeFilter] = useState<NotificationTypeFilter>('all');
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const pageSize = 10;
   const navigate = useNavigate();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const selectedTypes = typeFilterOptions.find(item => item.key === typeFilter)?.types;
+  const showMarkAllAsRead = unreadOnly ? total > 0 : unreadCount > 0;
 
   const fetchUnreadCount = async () => {
     try {
@@ -30,7 +47,12 @@ export default function NotificationPanel() {
   const fetchNotifications = async (pageNum: number = 1) => {
     setLoading(true);
     try {
-      const result = await getNotifications({ page: pageNum, pageSize });
+      const result = await getNotifications({ 
+        page: pageNum, 
+        pageSize,
+        type: selectedTypes,
+        isRead: unreadOnly ? false : undefined,
+      });
       if (pageNum === 1) {
         setNotifications(result.data);
       } else {
@@ -59,13 +81,33 @@ export default function NotificationPanel() {
     }
   };
 
+  const handleTypeFilterChange = (key: string) => {
+    setTypeFilter(key as NotificationTypeFilter);
+    setPage(1);
+  };
+
+  const handleUnreadOnlyChange = (checked: boolean) => {
+    setUnreadOnly(checked);
+    setPage(1);
+  };
+
+  useEffect(() => {
+    if (open) {
+      fetchNotifications(1);
+    }
+  }, [typeFilter, unreadOnly]);
+
   const handleMarkAsRead = async (id: string) => {
     try {
       await markAsRead(id);
-      setNotifications(prev => prev.map(n => 
-        n.id === id ? { ...n, isRead: true } : n
-      ));
+      setNotifications(prev => unreadOnly
+        ? prev.filter(n => n.id !== id)
+        : prev.map(n => n.id === id ? { ...n, isRead: true } : n)
+      );
       setUnreadCount(prev => Math.max(0, prev - 1));
+      if (unreadOnly) {
+        setTotal(prev => Math.max(0, prev - 1));
+      }
     } catch (e) {
       // silently fail
     }
@@ -73,9 +115,14 @@ export default function NotificationPanel() {
 
   const handleMarkAllAsRead = async () => {
     try {
-      const result = await markAllAsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-      setUnreadCount(0);
+      const result = await markAllAsRead(selectedTypes);
+      if (unreadOnly) {
+        setNotifications([]);
+        setTotal(0);
+      } else {
+        setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+      }
+      setUnreadCount(prev => Math.max(0, prev - result.count));
     } catch (e) {
       // silently fail
     }
@@ -113,7 +160,7 @@ export default function NotificationPanel() {
   };
 
   const content = (
-    <div style={{ width: 360 }}>
+    <div style={{ width: 420 }}>
       <div style={{ 
         padding: '12px 16px', 
         borderBottom: '1px solid #f0f0f0',
@@ -122,7 +169,7 @@ export default function NotificationPanel() {
         alignItems: 'center'
       }}>
         <Text strong>通知消息</Text>
-        {unreadCount > 0 && (
+        {showMarkAllAsRead && (
           <Button 
             type="link" 
             size="small" 
@@ -132,6 +179,19 @@ export default function NotificationPanel() {
             全部已读
           </Button>
         )}
+      </div>
+      <div style={{ padding: '8px 16px 10px', borderBottom: '1px solid #f0f0f0' }}>
+        <Tabs
+          size="small"
+          activeKey={typeFilter}
+          items={typeFilterOptions.map(item => ({ key: item.key, label: item.label }))}
+          onChange={handleTypeFilterChange}
+          style={{ marginBottom: 8 }}
+        />
+        <Space size={8}>
+          <Switch size="small" checked={unreadOnly} onChange={handleUnreadOnlyChange} />
+          <Text type="secondary" style={{ fontSize: 13 }}>只看未读</Text>
+        </Space>
       </div>
       <div style={{ maxHeight: 400, overflowY: 'auto' }}>
         {loading && notifications.length === 0 ? (
@@ -213,6 +273,7 @@ export default function NotificationPanel() {
     >
       <Badge count={unreadCount} size="small" offset={[-2, 2]}>
         <div
+          data-testid="notification-trigger"
           style={{
             cursor: 'pointer',
             padding: '0 8px',
