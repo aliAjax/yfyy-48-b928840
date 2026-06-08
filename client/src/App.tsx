@@ -11,6 +11,7 @@ import ApplicationEditPage from './pages/ApplicationEditPage';
 import ApplicationReviewPage from './pages/ApplicationReviewPage';
 import UserManagePage from './pages/UserManagePage';
 import LogListPage from './pages/LogListPage';
+import GuidePage from './pages/GuidePage';
 import { Spin } from 'antd';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -72,6 +73,8 @@ function AppRoutes() {
       }>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        
+        <Route path="guide" element={<GuidePage />} />
         
         <Route path="matters" element={
           user?.role === 'admin' ? <MatterManagePage /> : <MatterListPage />

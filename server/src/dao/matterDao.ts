@@ -45,6 +45,7 @@ export function findMatterByCode(code: string): Matter | null {
 export function listMatters(params?: {
   status?: string;
   keyword?: string;
+  department?: string;
   page?: number;
   pageSize?: number;
 }): { matters: Matter[]; total: number } {
@@ -54,6 +55,10 @@ export function listMatters(params?: {
   if (params?.status) {
     whereClauses.push('status = ?');
     paramsArr.push(params.status);
+  }
+  if (params?.department) {
+    whereClauses.push('department = ?');
+    paramsArr.push(params.department);
   }
   if (params?.keyword) {
     whereClauses.push('(name LIKE ? OR code LIKE ? OR department LIKE ?)');
@@ -145,4 +150,9 @@ export function updateMatter(id: string, data: Partial<{
 export function deleteMatter(id: string): boolean {
   const result = db.prepare('DELETE FROM matters WHERE id = ?').run(id);
   return result.changes > 0;
+}
+
+export function listDepartments(): string[] {
+  const rows = db.prepare('SELECT DISTINCT department FROM matters WHERE status = ? ORDER BY department').all('active') as { department: string }[];
+  return rows.map(row => row.department);
 }

@@ -10,6 +10,7 @@ import {
   HistoryOutlined,
   AuditOutlined,
   TeamOutlined,
+  SolutionOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -31,6 +32,12 @@ export default function MainLayout() {
       key: '/dashboard',
       icon: <DashboardOutlined />,
       label: '工作台',
+    });
+
+    items.push({
+      key: '/guide',
+      icon: <SolutionOutlined />,
+      label: '办事指南',
     });
 
     if (user?.role === 'applicant') {
