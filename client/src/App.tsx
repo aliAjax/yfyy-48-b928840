@@ -9,6 +9,7 @@ import ApplicationListPage from './pages/ApplicationListPage';
 import ApplicationDetailPage from './pages/ApplicationDetailPage';
 import ApplicationEditPage from './pages/ApplicationEditPage';
 import ApplicationReviewPage from './pages/ApplicationReviewPage';
+import BatchAcceptWorkbenchPage from './pages/BatchAcceptWorkbenchPage';
 import UserManagePage from './pages/UserManagePage';
 import LogListPage from './pages/LogListPage';
 import GuidePage from './pages/GuidePage';
@@ -96,6 +97,12 @@ function AppRoutes() {
         <Route path="applications" element={
           <RequireRole roles={['window', 'admin']}>
             <ApplicationListPage showAll />
+          </RequireRole>
+        } />
+        
+        <Route path="batch-accept" element={
+          <RequireRole roles={['window', 'admin']}>
+            <BatchAcceptWorkbenchPage />
           </RequireRole>
         } />
         

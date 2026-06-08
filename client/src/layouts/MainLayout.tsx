@@ -12,6 +12,7 @@ import {
   TeamOutlined,
   SolutionOutlined,
   CopyOutlined,
+  SelectOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -62,6 +63,11 @@ export default function MainLayout() {
 
     if (user?.role === 'window') {
       items.push({
+        key: '/batch-accept',
+        icon: <SelectOutlined />,
+        label: '批量受理工作台',
+      });
+      items.push({
         key: '/applications',
         icon: <FileTextOutlined />,
         label: '申请管理',
@@ -81,6 +87,11 @@ export default function MainLayout() {
         key: '/matters',
         icon: <AppstoreOutlined />,
         label: '事项管理',
+      });
+      items.push({
+        key: '/batch-accept',
+        icon: <SelectOutlined />,
+        label: '批量受理工作台',
       });
       items.push({
         key: '/applications',

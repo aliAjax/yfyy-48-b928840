@@ -128,6 +128,172 @@ router.get('/warning/list', authMiddleware, (req: AuthRequest, res) => {
   });
 });
 
+router.post('/batch/accept', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  if (!['window', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
+
+  const { ids } = req.body;
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    res.json({ success: false, message: '请选择要受理的申请' });
+    return;
+  }
+
+  const results: any[] = [];
+  let successCount = 0;
+  let failureCount = 0;
+
+  ids.forEach(id => {
+    let app = findApplicationById(id);
+    const resultItem: any = { id };
+
+    if (!app) {
+      resultItem.success = false;
+      resultItem.reason = '申请不存在';
+      failureCount++;
+      results.push(resultItem);
+      return;
+    }
+
+    resultItem.applicationNo = app.applicationNo;
+
+    if (app.status !== 'submitted') {
+      resultItem.success = false;
+      resultItem.reason = `当前状态「${app.status}」不能受理，仅待受理状态可操作`;
+      failureCount++;
+      results.push(resultItem);
+      return;
+    }
+
+    const oldStatus = app.status;
+    app = updateApplication(app.id, {
+      status: 'accepted',
+      windowUserId: req.user!.id,
+      acceptTime: now(),
+      currentStep: '材料审核中',
+    })!;
+
+    createLog({
+      applicationId: app.id,
+      userId: req.user!.id,
+      action: 'accept',
+      description: '窗口批量受理申请',
+      oldStatus,
+      newStatus: 'accepted',
+    });
+
+    const matter = findMatterById(app.matterId);
+    createNotification({
+      userId: app.applicantId,
+      type: 'accept',
+      title: '申请已受理',
+      content: `您的「${matter?.name || ''}」申请已被窗口受理，正在处理中。`,
+      applicationId: app.id,
+    });
+
+    resultItem.success = true;
+    successCount++;
+    results.push(resultItem);
+  });
+
+  res.json({
+    success: true,
+    data: {
+      successCount,
+      failureCount,
+      results,
+    },
+    message: `批量受理完成：成功 ${successCount} 条，失败 ${failureCount} 条`,
+  });
+});
+
+router.post('/batch/supplement', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  if (!['window', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
+
+  const { ids, reason } = req.body;
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    res.json({ success: false, message: '请选择要补正的申请' });
+    return;
+  }
+  if (!reason || !reason.trim()) {
+    res.json({ success: false, message: '请输入补正原因' });
+    return;
+  }
+
+  const results: any[] = [];
+  let successCount = 0;
+  let failureCount = 0;
+
+  ids.forEach(id => {
+    let app = findApplicationById(id);
+    const resultItem: any = { id };
+
+    if (!app) {
+      resultItem.success = false;
+      resultItem.reason = '申请不存在';
+      failureCount++;
+      results.push(resultItem);
+      return;
+    }
+
+    resultItem.applicationNo = app.applicationNo;
+
+    if (app.status !== 'submitted' && app.status !== 'accepted') {
+      resultItem.success = false;
+      resultItem.reason = `当前状态「${app.status}」不能要求补正，仅待受理或已受理状态可操作`;
+      failureCount++;
+      results.push(resultItem);
+      return;
+    }
+
+    const oldStatus = app.status;
+    app = updateApplication(app.id, {
+      status: 'supplement',
+      supplementReason: reason,
+    })!;
+
+    createLog({
+      applicationId: app.id,
+      userId: req.user!.id,
+      action: 'supplement',
+      description: `批量要求补正材料：${reason || ''}`,
+      oldStatus,
+      newStatus: 'supplement',
+    });
+
+    const matter = findMatterById(app.matterId);
+    createNotification({
+      userId: app.applicantId,
+      type: 'supplement',
+      title: '申请需补正材料',
+      content: `您的「${matter?.name || ''}」申请需要补正材料：${reason || ''}`,
+      applicationId: app.id,
+    });
+
+    resultItem.success = true;
+    successCount++;
+    results.push(resultItem);
+  });
+
+  res.json({
+    success: true,
+    data: {
+      successCount,
+      failureCount,
+      results,
+    },
+    message: `批量补正完成：成功 ${successCount} 条，失败 ${failureCount} 条`,
+  });
+});
+
 router.get('/warning/stats', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 

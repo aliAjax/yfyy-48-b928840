@@ -1,5 +1,5 @@
 import request from '../utils/request';
-import { Application, ApiResponse, ApplicationStatus, WarningStatus } from '../types';
+import { Application, ApiResponse, ApplicationStatus, WarningStatus, BatchOperationResult } from '../types';
 
 export function listApplications(params?: {
   status?: ApplicationStatus;
@@ -82,4 +82,12 @@ export function getWarningStats(): Promise<ApiResponse<{
   overdue: number;
 }>> {
   return request.get('/applications/warning/stats');
+}
+
+export function batchAcceptApplications(ids: string[]): Promise<ApiResponse<BatchOperationResult>> {
+  return request.post('/applications/batch/accept', { ids });
+}
+
+export function batchSupplementApplications(ids: string[], reason: string): Promise<ApiResponse<BatchOperationResult>> {
+  return request.post('/applications/batch/supplement', { ids, reason });
 }

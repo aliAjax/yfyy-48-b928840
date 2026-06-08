@@ -128,6 +128,19 @@ export interface ApiResponse<T = any> {
   total?: number;
 }
 
+export interface BatchOperationItem {
+  id: string;
+  applicationNo?: string;
+  success: boolean;
+  reason?: string;
+}
+
+export interface BatchOperationResult {
+  successCount: number;
+  failureCount: number;
+  results: BatchOperationItem[];
+}
+
 export interface PageParams {
   page?: number;
   pageSize?: number;

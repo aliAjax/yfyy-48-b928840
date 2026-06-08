@@ -140,3 +140,16 @@ export interface ApiResponse<T = any> {
   message?: string;
   total?: number;
 }
+
+export interface BatchOperationItem {
+  id: string;
+  applicationNo?: string;
+  success: boolean;
+  reason?: string;
+}
+
+export interface BatchOperationResult {
+  successCount: number;
+  failureCount: number;
+  results: BatchOperationItem[];
+}
