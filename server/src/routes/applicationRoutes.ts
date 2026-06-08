@@ -7,16 +7,44 @@ import { listCurrentFilesByApplication } from '../dao/fileDao';
 import { createNotification } from '../dao/notificationDao';
 import { listReviewOpinionsByApplication, batchCreateReviewOpinions, getMaxReviewRound } from '../dao/reviewOpinionDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
-import { now, toJSON, calculateWarningStatus, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep } from '../utils/helpers';
-import { ApplicationStatus, WarningStatus, ReviewOpinionStatus } from '../types';
+import { now, toJSON, calculateWarningStatus, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep, parseJSON } from '../utils/helpers';
+import { ApplicationMaterial, ApplicationStatus, MaterialCompleteness, MaterialCompletenessFilter, MatterMaterial, WarningStatus, ReviewOpinionStatus } from '../types';
 
 const router = Router();
+
+function fileMatchesMaterial(fileName: string, materialName: string): boolean {
+  const baseName = fileName.replace(/\.[^/.]+$/, '');
+  return fileName.includes(materialName) || materialName.includes(baseName);
+}
+
+function calculateMaterialCompleteness(app: any, requiredMaterialsStr?: string): MaterialCompleteness {
+  const matterMaterials = parseJSON<MatterMaterial[]>(requiredMaterialsStr, []);
+  const appMaterials = parseJSON<ApplicationMaterial[]>(app.materials, []);
+  const requiredMaterials = matterMaterials.filter(m => m.required);
+  const files = listCurrentFilesByApplication(app.id);
+
+  const missingRequired = requiredMaterials
+    .filter(material => {
+      const checked = appMaterials.some(m => m.name === material.name && m.required && m.checked);
+      const uploaded = files.some(file => fileMatchesMaterial(file.originalName, material.name));
+      return !checked && !uploaded;
+    })
+    .map(material => material.name);
+
+  return {
+    totalRequired: requiredMaterials.length,
+    completedRequired: requiredMaterials.length - missingRequired.length,
+    missingRequired,
+    isComplete: missingRequired.length === 0,
+  };
+}
 
 function enrichApplication(app: any) {
   const matter = findMatterById(app.matterId);
   const applicant = findUserById(app.applicantId);
   const files = listCurrentFilesByApplication(app.id);
   const reviewOpinions = listReviewOpinionsByApplication(app.id);
+  const materialCompleteness = calculateMaterialCompleteness(app, matter?.requiredMaterials);
   
   const { warningStatus, remainingDays } = calculateWarningStatus(
     app.acceptTime,
@@ -38,6 +66,7 @@ function enrichApplication(app: any) {
     promiseDays: matter?.promiseDays,
     flowSteps,
     currentStep: currentStepName,
+    materialCompleteness,
   };
 }
 
@@ -87,7 +116,7 @@ function notifyStepUsers(
 router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
   
-  const { status, keyword, page = 1, pageSize = 10, matterId, warningStatus } = req.query;
+  const { status, keyword, page = 1, pageSize = 10, matterId, warningStatus, materialCompleteness } = req.query;
   
   let applicantId: string | undefined;
   if (req.user.role === 'applicant') {
@@ -108,6 +137,13 @@ router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (warningStatus && canFilterByWarning) {
     const ws = warningStatus as WarningStatus;
     enriched = enriched.filter(app => app.warningStatus === ws);
+  }
+
+  const completeness = materialCompleteness as MaterialCompletenessFilter | undefined;
+  if (completeness === 'complete') {
+    enriched = enriched.filter(app => app.materialCompleteness?.isComplete);
+  } else if (completeness === 'incomplete') {
+    enriched = enriched.filter(app => !app.materialCompleteness?.isComplete);
   }
 
   const total = enriched.length;

@@ -57,6 +57,15 @@ export type ApplicationStatus =
 
 export type WarningStatus = 'normal' | 'warning' | 'overdue' | 'none';
 
+export type MaterialCompletenessFilter = 'all' | 'complete' | 'incomplete';
+
+export interface MaterialCompleteness {
+  totalRequired: number;
+  completedRequired: number;
+  missingRequired: string[];
+  isComplete: boolean;
+}
+
 export interface Application {
   id: string;
   applicationNo: string;
@@ -81,6 +90,7 @@ export interface Application {
   warningStatus?: WarningStatus;
   remainingDays?: number;
   promiseDays?: number;
+  materialCompleteness?: MaterialCompleteness;
 }
 
 export interface MaterialFile {

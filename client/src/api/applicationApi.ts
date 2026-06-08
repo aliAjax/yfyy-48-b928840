@@ -1,11 +1,12 @@
 import request from '../utils/request';
-import { Application, ApiResponse, ApplicationStatus, WarningStatus, BatchOperationResult, ReviewOpinion, ReviewOpinionFormData } from '../types';
+import { Application, ApiResponse, ApplicationStatus, WarningStatus, BatchOperationResult, ReviewOpinion, ReviewOpinionFormData, MaterialCompletenessFilter } from '../types';
 
 export function listApplications(params?: {
   status?: ApplicationStatus;
   keyword?: string;
   matterId?: string;
   warningStatus?: WarningStatus;
+  materialCompleteness?: MaterialCompletenessFilter;
   page?: number;
   pageSize?: number;
 }): Promise<ApiResponse<Application[]>> {
