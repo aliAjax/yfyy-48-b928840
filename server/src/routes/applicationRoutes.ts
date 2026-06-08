@@ -1,26 +1,22 @@
 import { Router } from 'express';
-import { 
-  findApplicationById, 
-  listApplications, 
-  createApplication, 
-  updateApplication,
-  findApplicationByNo 
-} from '../dao/applicationDao';
+import { findApplicationById, listApplications, createApplication, updateApplication, findApplicationByNo } from '../dao/applicationDao';
 import { findMatterById } from '../dao/matterDao';
 import { findUserById, listUsers } from '../dao/userDao';
 import { createLog, listLogsByApplication } from '../dao/logDao';
-import { listFilesByApplication } from '../dao/fileDao';
+import { listCurrentFilesByApplication } from '../dao/fileDao';
 import { createNotification } from '../dao/notificationDao';
+import { listReviewOpinionsByApplication, batchCreateReviewOpinions, getMaxReviewRound } from '../dao/reviewOpinionDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
 import { now, toJSON, calculateWarningStatus, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep } from '../utils/helpers';
-import { ApplicationStatus, WarningStatus } from '../types';
+import { ApplicationStatus, WarningStatus, ReviewOpinionStatus } from '../types';
 
 const router = Router();
 
 function enrichApplication(app: any) {
   const matter = findMatterById(app.matterId);
   const applicant = findUserById(app.applicantId);
-  const files = listFilesByApplication(app.id);
+  const files = listCurrentFilesByApplication(app.id);
+  const reviewOpinions = listReviewOpinionsByApplication(app.id);
   
   const { warningStatus, remainingDays } = calculateWarningStatus(
     app.acceptTime,
@@ -36,6 +32,7 @@ function enrichApplication(app: any) {
     matterName: matter?.name,
     applicantName: applicant?.name,
     files,
+    reviewOpinions,
     warningStatus,
     remainingDays,
     promiseDays: matter?.promiseDays,
@@ -697,98 +694,6 @@ router.post('/:id/send-review', authMiddleware, (req: AuthRequest, res) => {
   res.json({ success: true, data: enrichApplication(app), message: '已送审' });
 });
 
-router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
-  if (!req.user) return;
-
-  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
-    res.status(403).json({ success: false, message: '权限不足' });
-    return;
-  }
-
-  const { opinion, pass } = req.body;
-  let app = findApplicationById(req.params.id);
-  if (!app) {
-    res.json({ success: false, message: '申请不存在' });
-    return;
-  }
-
-  if (app.status !== 'reviewing') {
-    res.json({ success: false, message: '当前状态不能审核' });
-    return;
-  }
-
-  const { matter, flowSteps } = getApplicationFlow(app);
-  if (!ensureStepOperator(req, res, flowSteps, 'reviewing')) return;
-  
-  const oldStatus = app.status;
-  const appId = app.id;
-  const applicantId = app.applicantId;
-  
-  if (pass) {
-    const currentStepName = getStepName(flowSteps, 'approved');
-    
-    app = updateApplication(appId, {
-      status: 'approved',
-      reviewOpinion: opinion,
-      reviewerUserId: req.user.id,
-      currentStep: currentStepName,
-    })!;
-
-    createLog({
-      applicationId: appId,
-      userId: req.user.id,
-      action: 'review',
-      description: `审核通过，进入【${currentStepName}】环节：${opinion || ''}`,
-      oldStatus,
-      newStatus: 'approved',
-    });
-
-    createNotification({
-      userId: applicantId,
-      type: 'review_pass',
-      title: '审核通过',
-      content: `您的「${matter?.name || ''}」申请已审核通过，当前环节：${currentStepName}。`,
-      applicationId: appId,
-    });
-    notifyStepUsers(flowSteps, 'approved', {
-      type: 'review_pass',
-      title: '申请审核通过待办结',
-      content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时办结。`,
-      applicationId: appId,
-    });
-  } else {
-    const currentStepName = getStepName(flowSteps, 'rejected');
-
-    app = updateApplication(appId, {
-      status: 'rejected',
-      reviewOpinion: opinion,
-      reviewerUserId: req.user.id,
-      rejectReason: opinion,
-      completeTime: now(),
-      currentStep: currentStepName,
-    })!;
-
-    createLog({
-      applicationId: appId,
-      userId: req.user.id,
-      action: 'review',
-      description: `审核不通过，进入【${currentStepName}】环节：${opinion || ''}`,
-      oldStatus,
-      newStatus: 'rejected',
-    });
-
-    createNotification({
-      userId: applicantId,
-      type: 'review_reject',
-      title: '审核不通过',
-      content: `您的「${matter?.name || ''}」申请审核不通过，原因：${opinion || ''}`,
-      applicationId: appId,
-    });
-  }
-
-  res.json({ success: true, data: enrichApplication(app), message: '审核完成' });
-});
-
 router.post('/:id/complete', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 
@@ -892,6 +797,220 @@ router.get('/:id/logs', authMiddleware, (req: AuthRequest, res) => {
 
   const logs = listLogsByApplication(req.params.id);
   res.json({ success: true, data: logs });
+});
+
+router.get('/:id/review-opinions', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (req.user.role === 'applicant' && app.applicantId !== req.user.id) {
+    res.status(403).json({ success: false, message: '无权查看' });
+    return;
+  }
+
+  const opinions = listReviewOpinionsByApplication(req.params.id);
+  res.json({ success: true, data: opinions });
+});
+
+router.post('/:id/review-opinions', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
+
+  const app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (!['submitted', 'accepted', 'reviewing'].includes(app.status)) {
+    res.json({ success: false, message: '当前状态不能添加审查意见' });
+    return;
+  }
+
+  const { opinions } = req.body;
+  if (!opinions || !Array.isArray(opinions) || opinions.length === 0) {
+    res.json({ success: false, message: '请提供审查意见' });
+    return;
+  }
+
+  for (const op of opinions) {
+    if (!op.materialName || !op.status) {
+      res.json({ success: false, message: '材料名称和状态不能为空' });
+      return;
+    }
+    if (op.status !== 'pass' && op.status !== 'problem') {
+      res.json({ success: false, message: '状态值不正确' });
+      return;
+    }
+  }
+
+  const { matter, flowSteps } = getApplicationFlow(app);
+  if (!ensureStepOperator(req, res, flowSteps, app.status)) return;
+
+  const created = batchCreateReviewOpinions(
+    app.id,
+    opinions,
+    req.user.id,
+    req.user.name
+  );
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'review_opinion_save',
+    description: `保存材料审查意见，共 ${opinions.length} 项，其中通过 ${opinions.filter((o: any) => o.status === 'pass').length} 项，存在问题 ${opinions.filter((o: any) => o.status === 'problem').length} 项`,
+  });
+
+  res.json({ success: true, data: created, message: '审查意见已保存' });
+});
+
+function generateSummaryOpinion(opinions: Array<{ materialName: string; status: string; opinion: string }>): string {
+  const passItems = opinions.filter(o => o.status === 'pass');
+  const problemItems = opinions.filter(o => o.status === 'problem');
+
+  let summary = '';
+
+  if (problemItems.length > 0) {
+    summary += '存在问题的材料：\n';
+    problemItems.forEach((item, idx) => {
+      summary += `${idx + 1}. ${item.materialName}`;
+      if (item.opinion && item.opinion.trim()) {
+        summary += `：${item.opinion}`;
+      }
+      summary += '\n';
+    });
+  }
+
+  if (passItems.length > 0) {
+    if (summary) summary += '\n';
+    summary += '审核通过的材料：\n';
+    passItems.forEach((item, idx) => {
+      summary += `${idx + 1}. ${item.materialName}`;
+      if (item.opinion && item.opinion.trim()) {
+        summary += `：${item.opinion}`;
+      }
+      summary += '\n';
+    });
+  }
+
+  return summary.trim();
+}
+
+router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
+
+  const { opinion, pass, reviewOpinions } = req.body;
+  let app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (app.status !== 'reviewing') {
+    res.json({ success: false, message: '当前状态不能审核' });
+    return;
+  }
+
+  const { matter, flowSteps } = getApplicationFlow(app);
+  if (!ensureStepOperator(req, res, flowSteps, 'reviewing')) return;
+  
+  const oldStatus = app.status;
+  const appId = app.id;
+  const applicantId = app.applicantId;
+  
+  let finalOpinion = opinion || '';
+  
+  if (reviewOpinions && Array.isArray(reviewOpinions) && reviewOpinions.length > 0) {
+    batchCreateReviewOpinions(
+      appId,
+      reviewOpinions,
+      req.user.id,
+      req.user.name
+    );
+    
+    const summary = generateSummaryOpinion(reviewOpinions);
+    if (summary) {
+      finalOpinion = finalOpinion ? `${finalOpinion}\n\n${summary}` : summary;
+    }
+  }
+  
+  if (pass) {
+    const currentStepName = getStepName(flowSteps, 'approved');
+    
+    app = updateApplication(appId, {
+      status: 'approved',
+      reviewOpinion: finalOpinion,
+      reviewerUserId: req.user.id,
+      currentStep: currentStepName,
+    })!;
+
+    createLog({
+      applicationId: appId,
+      userId: req.user.id,
+      action: 'review',
+      description: `审核通过，进入【${currentStepName}】环节：${finalOpinion || ''}`,
+      oldStatus,
+      newStatus: 'approved',
+    });
+
+    createNotification({
+      userId: applicantId,
+      type: 'review_pass',
+      title: '审核通过',
+      content: `您的「${matter?.name || ''}」申请已审核通过，当前环节：${currentStepName}。`,
+      applicationId: appId,
+    });
+    notifyStepUsers(flowSteps, 'approved', {
+      type: 'review_pass',
+      title: '申请审核通过待办结',
+      content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时办结。`,
+      applicationId: appId,
+    });
+  } else {
+    const currentStepName = getStepName(flowSteps, 'rejected');
+
+    app = updateApplication(appId, {
+      status: 'rejected',
+      reviewOpinion: finalOpinion,
+      reviewerUserId: req.user.id,
+      rejectReason: finalOpinion,
+      completeTime: now(),
+      currentStep: currentStepName,
+    })!;
+
+    createLog({
+      applicationId: appId,
+      userId: req.user.id,
+      action: 'review',
+      description: `审核不通过，进入【${currentStepName}】环节：${finalOpinion || ''}`,
+      oldStatus,
+      newStatus: 'rejected',
+    });
+
+    createNotification({
+      userId: applicantId,
+      type: 'review_reject',
+      title: '审核不通过',
+      content: `您的「${matter?.name || ''}」申请审核不通过，原因：${finalOpinion || ''}`,
+      applicationId: appId,
+    });
+  }
+
+  res.json({ success: true, data: enrichApplication(app), message: '审核完成' });
 });
 
 export default router;

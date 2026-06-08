@@ -1,5 +1,5 @@
 import request from '../utils/request';
-import { Application, ApiResponse, ApplicationStatus, WarningStatus, BatchOperationResult } from '../types';
+import { Application, ApiResponse, ApplicationStatus, WarningStatus, BatchOperationResult, ReviewOpinion, ReviewOpinionFormData } from '../types';
 
 export function listApplications(params?: {
   status?: ApplicationStatus;
@@ -54,8 +54,17 @@ export function sendReviewApplication(id: string): Promise<ApiResponse<Applicati
 export function reviewApplication(id: string, data: {
   pass: boolean;
   opinion: string;
+  reviewOpinions?: ReviewOpinionFormData[];
 }): Promise<ApiResponse<Application>> {
   return request.post(`/applications/${id}/review`, data);
+}
+
+export function getReviewOpinions(id: string): Promise<ApiResponse<ReviewOpinion[]>> {
+  return request.get(`/applications/${id}/review-opinions`);
+}
+
+export function saveReviewOpinions(id: string, opinions: ReviewOpinionFormData[]): Promise<ApiResponse<ReviewOpinion[]>> {
+  return request.post(`/applications/${id}/review-opinions`, { opinions });
 }
 
 export function completeApplication(id: string): Promise<ApiResponse<Application>> {

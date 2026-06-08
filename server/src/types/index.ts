@@ -92,6 +92,10 @@ export interface MaterialFile {
   fileSize: number;
   mimeType?: string;
   uploadedBy: string;
+  uploadedByName?: string;
+  version: number;
+  isCurrent: boolean;
+  versionNote?: string;
   createdAt: string;
 }
 
@@ -249,6 +253,28 @@ export interface SupplementStats {
   supplementCount: number;
   supplementRate: number;
   avgSupplementCount: number;
+}
+
+export type ReviewOpinionStatus = 'pass' | 'problem';
+
+export interface ReviewOpinion {
+  id: string;
+  applicationId: string;
+  materialName: string;
+  status: ReviewOpinionStatus;
+  opinion: string;
+  reviewerId: string;
+  reviewerName?: string;
+  reviewRound: number;
+  createdAt: string;
+}
+
+export interface ReviewOpinionBatchCreateData {
+  opinions: Array<{
+    materialName: string;
+    status: ReviewOpinionStatus;
+    opinion: string;
+  }>;
 }
 
 export interface FullStatsOverview extends StatsOverview {

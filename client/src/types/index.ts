@@ -65,6 +65,10 @@ export interface MaterialFile {
   fileSize: number;
   mimeType?: string;
   uploadedBy: string;
+  uploadedByName?: string;
+  version: number;
+  isCurrent: boolean;
+  versionNote?: string;
   createdAt: string;
 }
 
@@ -90,6 +94,7 @@ export interface Application {
   createdAt: string;
   updatedAt: string;
   files?: MaterialFile[];
+  reviewOpinions?: ReviewOpinion[];
   warningStatus?: WarningStatus;
   remainingDays?: number;
   promiseDays?: number;
@@ -266,4 +271,24 @@ export interface FullStatsOverview extends StatsOverview {
   supplementRate: number;
   warningRate: number;
   overdueRate: number;
+}
+
+export type ReviewOpinionStatus = 'pass' | 'problem';
+
+export interface ReviewOpinion {
+  id: string;
+  applicationId: string;
+  materialName: string;
+  status: ReviewOpinionStatus;
+  opinion: string;
+  reviewerId: string;
+  reviewerName?: string;
+  reviewRound: number;
+  createdAt: string;
+}
+
+export interface ReviewOpinionFormData {
+  materialName: string;
+  status: ReviewOpinionStatus;
+  opinion: string;
 }

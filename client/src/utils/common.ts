@@ -52,6 +52,7 @@ export const actionLabels: Record<string, string> = {
   reject: '退回申请',
   send_review: '送审',
   review: '审核',
+  review_opinion_save: '保存审查意见',
   complete: '办结',
 };
 
