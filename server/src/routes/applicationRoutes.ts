@@ -58,7 +58,9 @@ router.get('/', authMiddleware, (req: AuthRequest, res) => {
 
   let enriched = result.applications.map(enrichApplication);
 
-  if (warningStatus) {
+  const canFilterByWarning = req.user.role === 'window' || req.user.role === 'admin';
+
+  if (warningStatus && canFilterByWarning) {
     const ws = warningStatus as WarningStatus;
     enriched = enriched.filter(app => app.warningStatus === ws);
   }
@@ -104,9 +106,11 @@ router.get('/warning/list', authMiddleware, (req: AuthRequest, res) => {
   }
 
   enriched.sort((a, b) => {
-    const order = { overdue: 0, warning: 1, normal: 2, none: 3 };
-    const aOrder = order[a.warningStatus || 'none'];
-    const bOrder = order[b.warningStatus || 'none'];
+    const order: Record<WarningStatus, number> = { overdue: 0, warning: 1, normal: 2, none: 3 };
+    const aStatus: WarningStatus = a.warningStatus || 'none';
+    const bStatus: WarningStatus = b.warningStatus || 'none';
+    const aOrder = order[aStatus];
+    const bOrder = order[bStatus];
     if (aOrder !== bOrder) return aOrder - bOrder;
     return (a.remainingDays || 0) - (b.remainingDays || 0);
   });

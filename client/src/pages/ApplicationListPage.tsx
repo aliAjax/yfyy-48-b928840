@@ -27,7 +27,7 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
   const navigate = useNavigate();
   const location = useLocation() as any;
 
-  const canFilterByWarning = user?.role === 'window' || user?.role === 'admin' || user?.role === 'reviewer';
+  const canFilterByWarning = user?.role === 'window' || user?.role === 'admin';
 
   useEffect(() => {
     if (location.state?.warningFilter) {
