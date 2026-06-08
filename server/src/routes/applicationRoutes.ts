@@ -1,0 +1,420 @@
+import { Router } from 'express';
+import { 
+  findApplicationById, 
+  listApplications, 
+  createApplication, 
+  updateApplication,
+  findApplicationByNo 
+} from '../dao/applicationDao';
+import { findMatterById } from '../dao/matterDao';
+import { findUserById } from '../dao/userDao';
+import { createLog, listLogsByApplication } from '../dao/logDao';
+import { listFilesByApplication } from '../dao/fileDao';
+import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
+import { now, toJSON } from '../utils/helpers';
+import { ApplicationStatus } from '../types';
+
+const router = Router();
+
+function enrichApplication(app: any) {
+  const matter = findMatterById(app.matterId);
+  const applicant = findUserById(app.applicantId);
+  const files = listFilesByApplication(app.id);
+  
+  return {
+    ...app,
+    matterName: matter?.name,
+    applicantName: applicant?.name,
+    files,
+  };
+}
+
+router.get('/', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+  
+  const { status, keyword, page = 1, pageSize = 10, matterId } = req.query;
+  
+  let applicantId: string | undefined;
+  if (req.user.role === 'applicant') {
+    applicantId = req.user.id;
+  }
+
+  const result = listApplications({
+    applicantId,
+    matterId: matterId as string,
+    status: status as ApplicationStatus,
+    keyword: keyword as string,
+    page: Number(page),
+    pageSize: Number(pageSize),
+  });
+
+  const enriched = result.applications.map(enrichApplication);
+
+  res.json({
+    success: true,
+    data: enriched,
+    total: result.total,
+  });
+});
+
+router.get('/:id', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (req.user.role === 'applicant' && app.applicantId !== req.user.id) {
+    res.status(403).json({ success: false, message: '无权查看此申请' });
+    return;
+  }
+
+  res.json({ success: true, data: enrichApplication(app) });
+});
+
+router.post('/', authMiddleware, requireRole('applicant'), (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const { matterId, basicInfo, materials } = req.body;
+
+  if (!matterId) {
+    res.json({ success: false, message: '请选择事项' });
+    return;
+  }
+
+  const matter = findMatterById(matterId);
+  if (!matter || matter.status !== 'active') {
+    res.json({ success: false, message: '事项不存在或未启用' });
+    return;
+  }
+
+  const app = createApplication({
+    matterId,
+    applicantId: req.user.id,
+    basicInfo: basicInfo ? toJSON(basicInfo) : undefined,
+    materials: materials ? toJSON(materials) : undefined,
+    status: 'draft',
+  });
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'create',
+    description: '创建申请草稿',
+  });
+
+  res.json({ success: true, data: enrichApplication(app), message: '创建成功' });
+});
+
+router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  let app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (app.applicantId !== req.user.id) {
+    res.status(403).json({ success: false, message: '无权操作此申请' });
+    return;
+  }
+
+  if (app.status !== 'draft' && app.status !== 'supplement') {
+    res.json({ success: false, message: '当前状态不能提交' });
+    return;
+  }
+
+  const oldStatus = app.status;
+  app = updateApplication(app.id, {
+    status: 'submitted',
+    submitTime: now(),
+  })!;
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'submit',
+    description: '提交申请，等待窗口受理',
+    oldStatus,
+    newStatus: 'submitted',
+  });
+
+  res.json({ success: true, data: enrichApplication(app), message: '提交成功' });
+});
+
+router.post('/:id/accept', authMiddleware, requireRole('window'), (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  let app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (app.status !== 'submitted') {
+    res.json({ success: false, message: '当前状态不能受理' });
+    return;
+  }
+
+  const oldStatus = app.status;
+  app = updateApplication(app.id, {
+    status: 'accepted',
+    windowUserId: req.user.id,
+    acceptTime: now(),
+    currentStep: '材料审核中',
+  })!;
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'accept',
+    description: '窗口受理申请',
+    oldStatus,
+    newStatus: 'accepted',
+  });
+
+  res.json({ success: true, data: enrichApplication(app), message: '受理成功' });
+});
+
+router.post('/:id/supplement', authMiddleware, requireRole('window'), (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const { reason } = req.body;
+  let app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (app.status !== 'submitted' && app.status !== 'accepted') {
+    res.json({ success: false, message: '当前状态不能补正' });
+    return;
+  }
+
+  const oldStatus = app.status;
+  app = updateApplication(app.id, {
+    status: 'supplement',
+    supplementReason: reason,
+  })!;
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'supplement',
+    description: `要求补正材料：${reason || ''}`,
+    oldStatus,
+    newStatus: 'supplement',
+  });
+
+  res.json({ success: true, data: enrichApplication(app), message: '已发送补正通知' });
+});
+
+router.post('/:id/reject', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+  
+  const { reason } = req.body;
+  
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
+
+  let app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (!['submitted', 'accepted', 'reviewing'].includes(app.status)) {
+    res.json({ success: false, message: '当前状态不能退回' });
+    return;
+  }
+
+  const oldStatus = app.status;
+  app = updateApplication(app.id, {
+    status: 'rejected',
+    rejectReason: reason,
+    completeTime: now(),
+  })!;
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'reject',
+    description: `申请被退回：${reason || ''}`,
+    oldStatus,
+    newStatus: 'rejected',
+  });
+
+  res.json({ success: true, data: enrichApplication(app), message: '已退回申请' });
+});
+
+router.post('/:id/send-review', authMiddleware, requireRole('window'), (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  let app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (app.status !== 'accepted') {
+    res.json({ success: false, message: '当前状态不能送审' });
+    return;
+  }
+
+  const oldStatus = app.status;
+  app = updateApplication(app.id, {
+    status: 'reviewing',
+    currentStep: '审核中',
+  })!;
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'send_review',
+    description: '材料审核通过，送交审核人员',
+    oldStatus,
+    newStatus: 'reviewing',
+  });
+
+  res.json({ success: true, data: enrichApplication(app), message: '已送审' });
+});
+
+router.post('/:id/review', authMiddleware, requireRole('reviewer'), (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const { opinion, pass } = req.body;
+  let app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (app.status !== 'reviewing') {
+    res.json({ success: false, message: '当前状态不能审核' });
+    return;
+  }
+
+  const oldStatus = app.status;
+  if (pass) {
+    app = updateApplication(app.id, {
+      status: 'approved',
+      reviewOpinion: opinion,
+      reviewerUserId: req.user.id,
+      currentStep: '审核通过，待办结',
+    })!;
+  } else {
+    app = updateApplication(app.id, {
+      status: 'rejected',
+      reviewOpinion: opinion,
+      reviewerUserId: req.user.id,
+      rejectReason: opinion,
+      completeTime: now(),
+    })!;
+  }
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'review',
+    description: `审核${pass ? '通过' : '不通过'}：${opinion || ''}`,
+    oldStatus,
+    newStatus: pass ? 'approved' : 'rejected',
+  });
+
+  res.json({ success: true, data: enrichApplication(app), message: '审核完成' });
+});
+
+router.post('/:id/complete', authMiddleware, requireRole('window'), (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  let app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (app.status !== 'approved') {
+    res.json({ success: false, message: '当前状态不能办结' });
+    return;
+  }
+
+  const oldStatus = app.status;
+  app = updateApplication(app.id, {
+    status: 'completed',
+    completeTime: now(),
+    currentStep: '已办结',
+  })!;
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'complete',
+    description: '申请已办结',
+    oldStatus,
+    newStatus: 'completed',
+  });
+
+  res.json({ success: true, data: enrichApplication(app), message: '办结成功' });
+});
+
+router.put('/:id', authMiddleware, requireRole('applicant'), (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const { id } = req.params;
+  const { basicInfo, materials } = req.body;
+
+  let app = findApplicationById(id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (app.applicantId !== req.user.id) {
+    res.status(403).json({ success: false, message: '无权操作此申请' });
+    return;
+  }
+
+  if (app.status !== 'draft' && app.status !== 'supplement') {
+    res.json({ success: false, message: '当前状态不能修改' });
+    return;
+  }
+
+  app = updateApplication(id, {
+    basicInfo: basicInfo ? toJSON(basicInfo) : undefined,
+    materials: materials ? toJSON(materials) : undefined,
+  })!;
+
+  createLog({
+    applicationId: app.id,
+    userId: req.user.id,
+    action: 'update',
+    description: '修改申请信息',
+  });
+
+  res.json({ success: true, data: enrichApplication(app), message: '更新成功' });
+});
+
+router.get('/:id/logs', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const app = findApplicationById(req.params.id);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (req.user.role === 'applicant' && app.applicantId !== req.user.id) {
+    res.status(403).json({ success: false, message: '无权查看' });
+    return;
+  }
+
+  const logs = listLogsByApplication(req.params.id);
+  res.json({ success: true, data: logs });
+});
+
+export default router;
