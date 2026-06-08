@@ -158,14 +158,14 @@ export default function ApplicationDetailPage() {
   const handleUpload = (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    
+
     uploadFile(id!, file).then((res) => {
       if (res.success) {
         message.success('上传成功');
         loadApplication();
       }
     }).catch(() => {});
-    
+
     return false;
   };
 
@@ -313,8 +313,8 @@ export default function ApplicationDetailPage() {
         )}
       </Card>
 
-      <Card 
-        title="材料清单核对" 
+      <Card
+        title="材料清单核对"
         style={{ marginBottom: 16 }}
         extra={
           displayMaterials.length > 0 && (
@@ -381,8 +381,8 @@ export default function ApplicationDetailPage() {
         )}
       </Card>
 
-      <Card 
-        title="上传材料" 
+      <Card
+        title="上传材料"
         style={{ marginBottom: 16 }}
         extra={
           (user?.role === 'applicant' && (application?.status === 'draft' || application?.status === 'supplement')) && (
@@ -426,7 +426,7 @@ export default function ApplicationDetailPage() {
       <Card title="办理进度">
         <Timeline
           items={logs.map(log => ({
-            color: log.action === 'create' ? 'gray' : 
+            color: log.action === 'create' ? 'gray' :
                    log.action === 'submit' ? 'blue' :
                    log.action === 'accept' ? 'green' :
                    log.action === 'reject' ? 'red' :
