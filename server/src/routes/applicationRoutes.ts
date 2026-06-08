@@ -134,9 +134,11 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
     submitTime: now(),
   })!;
 
+  const currentUser = req.user;
+
   createLog({
     applicationId: app.id,
-    userId: req.user.id,
+    userId: currentUser.id,
     action: 'submit',
     description: '提交申请，等待窗口受理',
     oldStatus,
@@ -150,7 +152,7 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
       userId: u.id,
       type: 'submit',
       title: '新申请待受理',
-      content: `申请人 ${req.user.name} 提交了「${matter?.name || ''}」申请，请及时受理。`,
+      content: `申请人 ${currentUser.name} 提交了「${matter?.name || ''}」申请，请及时受理。`,
       applicationId: app.id,
     });
   });
