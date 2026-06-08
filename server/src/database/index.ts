@@ -104,6 +104,22 @@ function initDatabase() {
       FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS application_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      matter_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      basic_info TEXT,
+      materials TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (matter_id) REFERENCES matters(id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_templates_user ON application_templates(user_id);
+    CREATE INDEX IF NOT EXISTS idx_templates_matter ON application_templates(matter_id);
+
     CREATE INDEX IF NOT EXISTS idx_applications_applicant ON applications(applicant_id);
     CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
     CREATE INDEX IF NOT EXISTS idx_applications_matter ON applications(matter_id);

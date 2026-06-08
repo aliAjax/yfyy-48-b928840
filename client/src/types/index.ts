@@ -128,3 +128,16 @@ export interface PageParams {
   pageSize?: number;
   [key: string]: any;
 }
+
+export interface ApplicationTemplate {
+  id: string;
+  name: string;
+  matterId: string;
+  matterName?: string;
+  userId: string;
+  userName?: string;
+  basicInfo: string;
+  materials: string;
+  createdAt: string;
+  updatedAt: string;
+}

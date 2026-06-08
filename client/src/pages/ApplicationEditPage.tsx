@@ -1,10 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Card, Form, Input, Button, Space, message, Upload, List, Divider, Checkbox, Tag, Modal } from 'antd';
-import { ArrowLeftOutlined, UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined, SendOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { Card, Form, Input, Button, Space, message, Upload, List, Divider, Checkbox, Tag, Modal, Select } from 'antd';
+import { ArrowLeftOutlined, UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined, SendOutlined, CheckCircleOutlined, CloseCircleOutlined, CopyOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, updateApplication, submitApplication } from '../api/applicationApi';
 import { getMatter } from '../api/matterApi';
-import { Application, Matter, ApplicationMaterial, MatterMaterial } from '../types';
+import { listTemplates, createTemplate, getTemplate } from '../api/templateApi';
+import { Application, Matter, ApplicationMaterial, MatterMaterial, ApplicationTemplate } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { safeJSONParse, formatFileSize } from '../utils/common';
 import { uploadFile, deleteFile, getDownloadUrl } from '../api/fileApi';
@@ -20,6 +21,13 @@ export default function ApplicationEditPage() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [materials, setMaterials] = useState<ApplicationMaterial[]>([]);
+  const [saveTemplateVisible, setSaveTemplateVisible] = useState(false);
+  const [applyTemplateVisible, setApplyTemplateVisible] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [templateList, setTemplateList] = useState<ApplicationTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -145,6 +153,78 @@ export default function ApplicationEditPage() {
     }
   };
 
+  const handleSaveAsTemplate = () => {
+    setTemplateName('');
+    setSaveTemplateVisible(true);
+  };
+
+  const handleConfirmSaveTemplate = async () => {
+    if (!templateName.trim()) {
+      message.warning('请输入模板名称');
+      return;
+    }
+    try {
+      const values = await form.getFieldsValue();
+      setSavingTemplate(true);
+      const res = await createTemplate({
+        name: templateName.trim(),
+        matterId: application!.matterId,
+        basicInfo: values,
+        materials,
+      });
+      if (res.success) {
+        message.success('模板保存成功');
+        setSaveTemplateVisible(false);
+      }
+    } catch (error) {
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
+  const handleApplyTemplate = () => {
+    loadTemplateList();
+    setSelectedTemplateId(null);
+    setApplyTemplateVisible(true);
+  };
+
+  const loadTemplateList = async () => {
+    if (!application?.matterId) return;
+    setLoadingTemplates(true);
+    try {
+      const res = await listTemplates({ matterId: application.matterId, pageSize: 100 });
+      if (res.success) {
+        setTemplateList(res.data || []);
+      }
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const handleConfirmApplyTemplate = async () => {
+    if (!selectedTemplateId) {
+      message.warning('请选择要套用的模板');
+      return;
+    }
+    try {
+      const res = await getTemplate(selectedTemplateId);
+      if (res.success && res.data) {
+        const basicInfo = safeJSONParse<Record<string, any>>(res.data.basicInfo, {});
+        const templateMaterials = safeJSONParse<ApplicationMaterial[]>(res.data.materials, []);
+
+        form.setFieldsValue(basicInfo);
+
+        if (templateMaterials.length > 0) {
+          setMaterials(templateMaterials);
+        }
+
+        message.success('模板套用成功');
+        setApplyTemplateVisible(false);
+      }
+    } catch (error) {
+    }
+  };
+
   const handleUpload = (file: File) => {
     uploadFile(id!, file).then((res) => {
       if (res.success) {
@@ -178,6 +258,12 @@ export default function ApplicationEditPage() {
       <Space style={{ marginBottom: 16 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)}>
           返回
+        </Button>
+        <Button icon={<CopyOutlined />} onClick={handleApplyTemplate}>
+          套用模板
+        </Button>
+        <Button icon={<SaveOutlined />} onClick={handleSaveAsTemplate}>
+          保存为模板
         </Button>
         <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
           保存草稿
@@ -340,6 +426,72 @@ export default function ApplicationEditPage() {
           <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>暂无上传材料</div>
         )}
       </Card>
+
+      <Modal
+        title="保存为模板"
+        open={saveTemplateVisible}
+        onCancel={() => setSaveTemplateVisible(false)}
+        onOk={handleConfirmSaveTemplate}
+        confirmLoading={savingTemplate}
+        okText="保存"
+        cancelText="取消"
+      >
+        <div style={{ marginTop: 16 }}>
+          <p style={{ marginBottom: 16, color: '#666' }}>
+            将当前申请的基本信息和材料核对内容保存为模板，下次创建同类申请时可一键套用。
+          </p>
+          <Form layout="vertical">
+            <Form.Item label="模板名称" required>
+              <Input
+                placeholder="请输入模板名称，便于下次快速识别"
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                maxLength={50}
+              />
+            </Form.Item>
+            <div style={{ color: '#999', fontSize: 12 }}>
+              所属事项：{matter?.name}
+            </div>
+          </Form>
+        </div>
+      </Modal>
+
+      <Modal
+        title="套用模板"
+        open={applyTemplateVisible}
+        onCancel={() => setApplyTemplateVisible(false)}
+        onOk={handleConfirmApplyTemplate}
+        okText="套用"
+        cancelText="取消"
+        width={500}
+      >
+        <div style={{ marginTop: 16 }}>
+          <p style={{ marginBottom: 16, color: '#666' }}>
+            选择一个模板，将自动填充基本信息和材料核对内容。
+          </p>
+          <Select
+            placeholder="请选择模板"
+            style={{ width: '100%' }}
+            loading={loadingTemplates}
+            value={selectedTemplateId}
+            onChange={(value) => setSelectedTemplateId(value)}
+            options={templateList.map(t => ({
+              label: t.name,
+              value: t.id,
+            }))}
+            notFoundContent="暂无可用模板"
+            showSearch
+            optionFilterProp="label"
+          />
+          {selectedTemplateId && (
+            <div style={{ marginTop: 12, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
+              <div style={{ color: '#999', fontSize: 12 }}>
+                创建时间：{dayjs(templateList.find(t => t.id === selectedTemplateId)?.createdAt).format('YYYY-MM-DD HH:mm')}
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import ApplicationReviewPage from './pages/ApplicationReviewPage';
 import UserManagePage from './pages/UserManagePage';
 import LogListPage from './pages/LogListPage';
 import GuidePage from './pages/GuidePage';
+import TemplateListPage from './pages/TemplateListPage';
 import { Spin } from 'antd';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -83,6 +84,12 @@ function AppRoutes() {
         <Route path="my-applications" element={
           <RequireRole roles={['applicant']}>
             <ApplicationListPage />
+          </RequireRole>
+        } />
+
+        <Route path="templates" element={
+          <RequireRole roles={['applicant']}>
+            <TemplateListPage />
           </RequireRole>
         } />
         

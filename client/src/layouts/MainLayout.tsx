@@ -11,6 +11,7 @@ import {
   AuditOutlined,
   TeamOutlined,
   SolutionOutlined,
+  CopyOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -51,6 +52,11 @@ export default function MainLayout() {
         key: '/my-applications',
         icon: <FileTextOutlined />,
         label: '我的申请',
+      });
+      items.push({
+        key: '/templates',
+        icon: <CopyOutlined />,
+        label: '常用模板',
       });
     }
 
