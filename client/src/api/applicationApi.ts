@@ -1,10 +1,11 @@
 import request from '../utils/request';
-import { Application, ApiResponse, ApplicationStatus } from '../types';
+import { Application, ApiResponse, ApplicationStatus, WarningStatus } from '../types';
 
 export function listApplications(params?: {
   status?: ApplicationStatus;
   keyword?: string;
   matterId?: string;
+  warningStatus?: WarningStatus;
   page?: number;
   pageSize?: number;
 }): Promise<ApiResponse<Application[]>> {
@@ -63,4 +64,22 @@ export function completeApplication(id: string): Promise<ApiResponse<Application
 
 export function getApplicationLogs(id: string): Promise<ApiResponse<any[]>> {
   return request.get(`/applications/${id}/logs`);
+}
+
+export function getWarningList(params?: {
+  warningStatus?: WarningStatus;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<ApiResponse<Application[]>> {
+  return request.get('/applications/warning/list', { params });
+}
+
+export function getWarningStats(): Promise<ApiResponse<{
+  total: number;
+  normal: number;
+  warning: number;
+  overdue: number;
+}>> {
+  return request.get('/applications/warning/stats');
 }

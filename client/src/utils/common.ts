@@ -1,4 +1,4 @@
-import { ApplicationStatus, User, UserRole } from '../types';
+import { ApplicationStatus, User, UserRole, WarningStatus } from '../types';
 
 export const statusLabels: Record<ApplicationStatus, string> = {
   draft: '草稿',
@@ -20,6 +20,20 @@ export const statusColors: Record<ApplicationStatus, string> = {
   approved: 'success',
   rejected: 'error',
   completed: 'success',
+};
+
+export const warningLabels: Record<WarningStatus, string> = {
+  normal: '正常',
+  warning: '即将超期',
+  overdue: '已超期',
+  none: '-',
+};
+
+export const warningColors: Record<WarningStatus, string> = {
+  normal: 'success',
+  warning: 'warning',
+  overdue: 'error',
+  none: 'default',
 };
 
 export const roleLabels: Record<UserRole, string> = {

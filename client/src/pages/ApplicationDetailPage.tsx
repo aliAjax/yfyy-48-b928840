@@ -3,6 +3,7 @@ import { Card, Descriptions, Tag, Timeline, Button, Space, List, Modal, message,
 import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, getApplicationLogs, submitApplication, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication, reviewApplication } from '../api/applicationApi';
+import { warningLabels, warningColors } from '../utils/common';
 import { getMatter } from '../api/matterApi';
 import { Application, OperationLog, MaterialFile, ApplicationStatus, ApplicationMaterial, MatterMaterial } from '../types';
 import { statusLabels, statusColors, formatFileSize, safeJSONParse, actionLabels } from '../utils/common';
@@ -269,8 +270,25 @@ export default function ApplicationDetailPage() {
               {statusLabels[application?.status || 'draft']}
             </Tag>
           </Descriptions.Item>
+          <Descriptions.Item label="预警状态">
+            {application?.warningStatus && application.warningStatus !== 'none' ? (
+              <Tag color={warningColors[application.warningStatus] as any}>
+                {warningLabels[application.warningStatus]}
+                {application.remainingDays !== undefined && application.remainingDays !== null && (
+                  <span style={{ marginLeft: 4 }}>
+                    ({application.remainingDays > 0 ? `剩余${application.remainingDays}天` : `超期${Math.abs(application.remainingDays)}天`})
+                  </span>
+                )}
+              </Tag>
+            ) : (
+              <span style={{ color: '#999' }}>-</span>
+            )}
+          </Descriptions.Item>
           <Descriptions.Item label="事项名称">{application?.matterName}</Descriptions.Item>
           <Descriptions.Item label="申请人">{application?.applicantName}</Descriptions.Item>
+          <Descriptions.Item label="承诺时限">
+            {application?.promiseDays ? `${application.promiseDays} 个工作日` : '-'}
+          </Descriptions.Item>
           <Descriptions.Item label="当前环节">{application?.currentStep || '-'}</Descriptions.Item>
           <Descriptions.Item label="申请时间">
             {application?.submitTime ? dayjs(application.submitTime).format('YYYY-MM-DD HH:mm') : '-'}

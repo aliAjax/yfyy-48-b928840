@@ -12,8 +12,8 @@ import { createLog, listLogsByApplication } from '../dao/logDao';
 import { listFilesByApplication } from '../dao/fileDao';
 import { createNotification } from '../dao/notificationDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
-import { now, toJSON } from '../utils/helpers';
-import { ApplicationStatus } from '../types';
+import { now, toJSON, calculateWarningStatus } from '../utils/helpers';
+import { ApplicationStatus, WarningStatus } from '../types';
 
 const router = Router();
 
@@ -22,18 +22,27 @@ function enrichApplication(app: any) {
   const applicant = findUserById(app.applicantId);
   const files = listFilesByApplication(app.id);
   
+  const { warningStatus, remainingDays } = calculateWarningStatus(
+    app.acceptTime,
+    matter?.promiseDays,
+    app.status
+  );
+  
   return {
     ...app,
     matterName: matter?.name,
     applicantName: applicant?.name,
     files,
+    warningStatus,
+    remainingDays,
+    promiseDays: matter?.promiseDays,
   };
 }
 
 router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
   
-  const { status, keyword, page = 1, pageSize = 10, matterId } = req.query;
+  const { status, keyword, page = 1, pageSize = 10, matterId, warningStatus } = req.query;
   
   let applicantId: string | undefined;
   if (req.user.role === 'applicant') {
@@ -45,17 +54,101 @@ router.get('/', authMiddleware, (req: AuthRequest, res) => {
     matterId: matterId as string,
     status: status as ApplicationStatus,
     keyword: keyword as string,
-    page: Number(page),
-    pageSize: Number(pageSize),
+  });
+
+  let enriched = result.applications.map(enrichApplication);
+
+  if (warningStatus) {
+    const ws = warningStatus as WarningStatus;
+    enriched = enriched.filter(app => app.warningStatus === ws);
+  }
+
+  const total = enriched.length;
+  const pageNum = Number(page);
+  const pageSizeNum = Number(pageSize);
+  const start = (pageNum - 1) * pageSizeNum;
+  const paged = enriched.slice(start, start + pageSizeNum);
+
+  res.json({
+    success: true,
+    data: paged,
+    total,
+  });
+});
+
+router.get('/warning/list', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const { warningStatus, page = 1, pageSize = 10, keyword } = req.query;
+
+  let applicantId: string | undefined;
+  if (req.user.role === 'applicant') {
+    applicantId = req.user.id;
+  }
+
+  const result = listApplications({
+    applicantId,
+    keyword: keyword as string,
+  });
+
+  let enriched = result.applications.map(enrichApplication);
+
+  const activeStatuses: ApplicationStatus[] = ['submitted', 'accepted', 'supplement', 'reviewing', 'approved'];
+  enriched = enriched.filter(app => activeStatuses.includes(app.status));
+
+  if (warningStatus) {
+    const ws = warningStatus as WarningStatus;
+    enriched = enriched.filter(app => app.warningStatus === ws);
+  } else {
+    enriched = enriched.filter(app => app.warningStatus === 'warning' || app.warningStatus === 'overdue');
+  }
+
+  enriched.sort((a, b) => {
+    const order = { overdue: 0, warning: 1, normal: 2, none: 3 };
+    const aOrder = order[a.warningStatus || 'none'];
+    const bOrder = order[b.warningStatus || 'none'];
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return (a.remainingDays || 0) - (b.remainingDays || 0);
+  });
+
+  const total = enriched.length;
+  const pageNum = Number(page);
+  const pageSizeNum = Number(pageSize);
+  const start = (pageNum - 1) * pageSizeNum;
+  const paged = enriched.slice(start, start + pageSizeNum);
+
+  res.json({
+    success: true,
+    data: paged,
+    total,
+  });
+});
+
+router.get('/warning/stats', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  let applicantId: string | undefined;
+  if (req.user.role === 'applicant') {
+    applicantId = req.user.id;
+  }
+
+  const result = listApplications({
+    applicantId,
   });
 
   const enriched = result.applications.map(enrichApplication);
 
-  res.json({
-    success: true,
-    data: enriched,
-    total: result.total,
-  });
+  const activeStatuses: ApplicationStatus[] = ['submitted', 'accepted', 'supplement', 'reviewing', 'approved'];
+  const activeApps = enriched.filter(app => activeStatuses.includes(app.status));
+
+  const stats = {
+    total: activeApps.length,
+    normal: activeApps.filter(a => a.warningStatus === 'normal').length,
+    warning: activeApps.filter(a => a.warningStatus === 'warning').length,
+    overdue: activeApps.filter(a => a.warningStatus === 'overdue').length,
+  };
+
+  res.json({ success: true, data: stats });
 });
 
 router.get('/:id', authMiddleware, (req: AuthRequest, res) => {

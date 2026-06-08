@@ -47,6 +47,8 @@ export type ApplicationStatus =
   | 'rejected' 
   | 'completed';
 
+export type WarningStatus = 'normal' | 'warning' | 'overdue' | 'none';
+
 export interface Application {
   id: string;
   applicationNo: string;
@@ -68,6 +70,9 @@ export interface Application {
   completeTime?: string;
   createdAt: string;
   updatedAt: string;
+  warningStatus?: WarningStatus;
+  remainingDays?: number;
+  promiseDays?: number;
 }
 
 export interface MaterialFile {

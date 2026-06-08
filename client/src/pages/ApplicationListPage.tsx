@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { Table, Card, Input, Select, Button, Space, Tag, Modal, message } from 'antd';
 import { SearchOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { listApplications, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication } from '../api/applicationApi';
-import { Application, ApplicationStatus } from '../types';
-import { statusLabels, statusColors, roleLabels } from '../utils/common';
+import { Application, ApplicationStatus, WarningStatus } from '../types';
+import { statusLabels, statusColors, roleLabels, warningLabels, warningColors } from '../utils/common';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import dayjs from 'dayjs';
 
 interface ApplicationListPageProps {
@@ -21,13 +21,23 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [warningFilter, setWarningFilter] = useState<string>('');
   
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation() as any;
+
+  const canFilterByWarning = user?.role === 'window' || user?.role === 'admin' || user?.role === 'reviewer';
+
+  useEffect(() => {
+    if (location.state?.warningFilter) {
+      setWarningFilter(location.state.warningFilter);
+    }
+  }, []);
 
   useEffect(() => {
     loadApplications();
-  }, [page, pageSize, keyword, statusFilter]);
+  }, [page, pageSize, keyword, statusFilter, warningFilter]);
 
   const loadApplications = async () => {
     setLoading(true);
@@ -35,6 +45,7 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
       const params: any = { page, pageSize };
       if (keyword) params.keyword = keyword;
       if (statusFilter) params.status = statusFilter;
+      if (warningFilter && canFilterByWarning) params.warningStatus = warningFilter;
 
       const res = await listApplications(params);
       if (res.success) {
@@ -54,6 +65,7 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
   const handleReset = () => {
     setKeyword('');
     setStatusFilter('');
+    setWarningFilter('');
     setPage(1);
   };
 
@@ -232,6 +244,27 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
       ),
     },
     {
+      title: '预警状态',
+      dataIndex: 'warningStatus',
+      key: 'warningStatus',
+      width: 140,
+      render: (warningStatus: WarningStatus, record: Application) => {
+        if (!warningStatus || warningStatus === 'none') {
+          return <span style={{ color: '#999' }}>-</span>;
+        }
+        return (
+          <Tag color={warningColors[warningStatus] as any}>
+            {warningLabels[warningStatus]}
+            {record.remainingDays !== undefined && record.remainingDays !== null && (
+              <span style={{ marginLeft: 4 }}>
+                ({record.remainingDays > 0 ? `剩余${record.remainingDays}天` : `超期${Math.abs(record.remainingDays)}天`})
+              </span>
+            )}
+          </Tag>
+        );
+      },
+    },
+    {
       title: '当前环节',
       dataIndex: 'currentStep',
       key: 'currentStep',
@@ -270,6 +303,13 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
     { value: 'completed', label: '已办结' },
   ];
 
+  const warningOptions = [
+    { value: '', label: '全部预警' },
+    { value: 'normal', label: '正常' },
+    { value: 'warning', label: '即将超期' },
+    { value: 'overdue', label: '已超期' },
+  ];
+
   return (
     <Card
       title={reviewMode ? '待审核申请' : showAll ? '申请管理' : '我的申请'}
@@ -289,6 +329,14 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
             options={statusOptions}
             style={{ width: 140 }}
           />
+          {canFilterByWarning && (
+            <Select
+              value={warningFilter}
+              onChange={setWarningFilter}
+              options={warningOptions}
+              style={{ width: 140 }}
+            />
+          )}
           <Button icon={<ReloadOutlined />} onClick={handleReset}>
             重置
           </Button>
