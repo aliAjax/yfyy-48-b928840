@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, Descriptions, Tag, Timeline, Button, Space, List, Modal, message, Input, Upload } from 'antd';
-import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, getApplicationLogs, submitApplication, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication, reviewApplication } from '../api/applicationApi';
-import { Application, OperationLog, MaterialFile, ApplicationStatus } from '../types';
+import { getMatter } from '../api/matterApi';
+import { Application, OperationLog, MaterialFile, ApplicationStatus, ApplicationMaterial, MatterMaterial } from '../types';
 import { statusLabels, statusColors, formatFileSize, safeJSONParse, actionLabels } from '../utils/common';
 import { useAuth } from '../context/AuthContext';
 import dayjs from 'dayjs';
@@ -15,6 +16,7 @@ export default function ApplicationDetailPage() {
   const { user } = useAuth();
   const [application, setApplication] = useState<Application | null>(null);
   const [logs, setLogs] = useState<OperationLog[]>([]);
+  const [matter, setMatter] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -30,6 +32,12 @@ export default function ApplicationDetailPage() {
       const res = await getApplication(id!);
       if (res.success) {
         setApplication(res.data || null);
+        if (res.data?.matterId) {
+          const matterRes = await getMatter(res.data.matterId);
+          if (matterRes.success) {
+            setMatter(matterRes.data);
+          }
+        }
       }
     } finally {
       setLoading(false);
@@ -222,11 +230,23 @@ export default function ApplicationDetailPage() {
   };
 
   const basicInfo = application ? safeJSONParse<Record<string, any>>(application.basicInfo, {}) : {};
-  const materials = application ? safeJSONParse<any[]>(application.materials, []) : [];
-  const requiredMaterials = application ? safeJSONParse<any[]>(
-    // 我们没有事项的详情在申请详情里，但可以从别处获取
-    '[]', []
-  ) : [];
+
+  const displayMaterials = useMemo((): ApplicationMaterial[] => {
+    if (!application) return [];
+    const appMaterials = safeJSONParse<ApplicationMaterial[]>(application.materials, []);
+    if (appMaterials.length > 0 && appMaterials.some(m => 'checked' in m)) {
+      return appMaterials;
+    }
+    if (matter) {
+      const matterMaterials = safeJSONParse<MatterMaterial[]>(matter.requiredMaterials, []);
+      return matterMaterials.map(m => ({ ...m, checked: false, remark: '' }));
+    }
+    return [];
+  }, [application, matter]);
+
+  const checkedCount = useMemo(() => displayMaterials.filter(m => m.checked).length, [displayMaterials]);
+  const requiredCount = useMemo(() => displayMaterials.filter(m => m.required).length, [displayMaterials]);
+  const requiredCheckedCount = useMemo(() => displayMaterials.filter(m => m.required && m.checked).length, [displayMaterials]);
 
   if (!application && !loading) {
     return <div style={{ textAlign: 'center', padding: 40 }}>申请不存在</div>;
@@ -290,6 +310,74 @@ export default function ApplicationDetailPage() {
           </Descriptions>
         ) : (
           <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>暂无填写信息</div>
+        )}
+      </Card>
+
+      <Card 
+        title="材料清单核对" 
+        style={{ marginBottom: 16 }}
+        extra={
+          displayMaterials.length > 0 && (
+            <Space size={8}>
+              <Tag color="blue">共 {displayMaterials.length} 项</Tag>
+              <Tag color="orange">必填 {requiredCount} 项</Tag>
+              <Tag color={requiredCheckedCount === requiredCount ? 'green' : 'default'}>
+                已准备 {checkedCount} 项
+                {requiredCount > 0 && ` (必填 ${requiredCheckedCount}/${requiredCount})`}
+              </Tag>
+            </Space>
+          )
+        }
+      >
+        {displayMaterials.length > 0 ? (
+          <div style={{ border: '1px solid #e8e8e8', borderRadius: 4, overflow: 'hidden' }}>
+            {displayMaterials.map((m, idx) => (
+              <div
+                key={idx}
+                style={{
+                  padding: '12px 16px',
+                  borderBottom: idx < displayMaterials.length - 1 ? '1px solid #f0f0f0' : 'none',
+                  background: m.checked ? '#f6ffed' : '#fff',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ marginTop: 2 }}>
+                    {m.checked ? (
+                      <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 16 }} />
+                    ) : (
+                      <CloseCircleOutlined style={{ color: '#bfbfbf', fontSize: 16 }} />
+                    )}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <strong style={{ fontSize: 14 }}>
+                        {m.required && <span style={{ color: 'red' }}>* </span>}
+                        {m.name}
+                      </strong>
+                      {m.checked ? (
+                        <Tag icon={<CheckCircleOutlined />} color="success">已准备</Tag>
+                      ) : (
+                        <Tag icon={<CloseCircleOutlined />} color="default">未准备</Tag>
+                      )}
+                    </div>
+                    {m.description && (
+                      <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>
+                        {m.description}
+                      </div>
+                    )}
+                    {m.remark && (
+                      <div style={{ marginTop: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 4, borderLeft: '3px solid #1890ff' }}>
+                        <div style={{ color: '#666', fontSize: 12, marginBottom: 4 }}>备注：</div>
+                        <div style={{ color: '#333' }}>{m.remark}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>暂无材料清单</div>
         )}
       </Card>
 

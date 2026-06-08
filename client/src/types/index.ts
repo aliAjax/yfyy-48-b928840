@@ -11,6 +11,17 @@ export interface User {
   updatedAt: string;
 }
 
+export interface MatterMaterial {
+  name: string;
+  required: boolean;
+  description?: string;
+}
+
+export interface ApplicationMaterial extends MatterMaterial {
+  checked: boolean;
+  remark?: string;
+}
+
 export interface Matter {
   id: string;
   code: string;
