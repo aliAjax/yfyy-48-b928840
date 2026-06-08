@@ -3,7 +3,7 @@ import { Card, Descriptions, Tag, Timeline, Button, Space, List, Modal, message,
 import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, UserOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, getApplicationLogs, submitApplication, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication, reviewApplication } from '../api/applicationApi';
-import { warningLabels, warningColors, parseFlowConfig, roleLabels, DEFAULT_FLOW_STEPS } from '../utils/common';
+import { warningLabels, warningColors, parseFlowConfig, roleLabels, DEFAULT_FLOW_STEPS, canOperateStep } from '../utils/common';
 import { getMatter } from '../api/matterApi';
 import { Application, OperationLog, MaterialFile, ApplicationStatus, ApplicationMaterial, MatterMaterial, FlowStep } from '../types';
 import { statusLabels, statusColors, formatFileSize, safeJSONParse, actionLabels } from '../utils/common';
@@ -180,13 +180,22 @@ export default function ApplicationDetailPage() {
     } catch {}
   };
 
+  const flowSteps = useMemo((): FlowStep[] => {
+    if (application?.flowSteps && application.flowSteps.length > 0) {
+      return application.flowSteps;
+    }
+    if (matter?.flowConfig) {
+      return parseFlowConfig(matter.flowConfig);
+    }
+    return [...DEFAULT_FLOW_STEPS];
+  }, [application, matter]);
+
+  const canOperate = (status: ApplicationStatus) => canOperateStep(flowSteps, status, user?.role);
+
   const getActionButtons = () => {
     if (!application) return null;
     const buttons: JSX.Element[] = [];
     const isApplicant = user?.role === 'applicant';
-    const isWindow = user?.role === 'window';
-    const isReviewer = user?.role === 'reviewer';
-    const isAdmin = user?.role === 'admin';
 
     if (isApplicant && application.applicantId === user?.id) {
       if (application.status === 'draft' || application.status === 'supplement') {
@@ -203,28 +212,26 @@ export default function ApplicationDetailPage() {
       }
     }
 
-    if (isWindow || isAdmin) {
-      if (application.status === 'submitted') {
-        buttons.push(<Button type="primary" onClick={handleAccept}>受理</Button>);
-        buttons.push(<Button danger onClick={handleReject}>退回</Button>);
-      }
-      if (application.status === 'accepted') {
-        buttons.push(<Button onClick={handleSupplement}>要求补正</Button>);
-        buttons.push(<Button type="primary" onClick={handleSendReview}>送审</Button>);
-      }
-      if (application.status === 'approved') {
-        buttons.push(<Button type="primary" onClick={handleComplete}>办结</Button>);
-      }
+    if (application.status === 'submitted' && canOperate('submitted')) {
+      buttons.push(<Button type="primary" onClick={handleAccept}>受理</Button>);
+      buttons.push(<Button danger onClick={handleReject}>退回</Button>);
     }
 
-    if (isReviewer || isAdmin) {
-      if (application.status === 'reviewing') {
-        buttons.push(
-          <Button type="primary" onClick={() => navigate(`/applications/${id}/review`)}>
-            审核
-          </Button>
-        );
-      }
+    if (application.status === 'accepted' && canOperate('accepted')) {
+      buttons.push(<Button onClick={handleSupplement}>要求补正</Button>);
+      buttons.push(<Button type="primary" onClick={handleSendReview}>送审</Button>);
+    }
+
+    if (application.status === 'reviewing' && canOperate('reviewing')) {
+      buttons.push(
+        <Button type="primary" onClick={() => navigate(`/applications/${id}/review`)}>
+          审核
+        </Button>
+      );
+    }
+
+    if (application.status === 'approved' && canOperate('approved')) {
+      buttons.push(<Button type="primary" onClick={handleComplete}>办结</Button>);
     }
 
     return buttons;
@@ -248,16 +255,6 @@ export default function ApplicationDetailPage() {
   const checkedCount = useMemo(() => displayMaterials.filter(m => m.checked).length, [displayMaterials]);
   const requiredCount = useMemo(() => displayMaterials.filter(m => m.required).length, [displayMaterials]);
   const requiredCheckedCount = useMemo(() => displayMaterials.filter(m => m.required && m.checked).length, [displayMaterials]);
-
-  const flowSteps = useMemo((): FlowStep[] => {
-    if (application?.flowSteps && application.flowSteps.length > 0) {
-      return application.flowSteps;
-    }
-    if (matter?.flowConfig) {
-      return parseFlowConfig(matter.flowConfig);
-    }
-    return [...DEFAULT_FLOW_STEPS];
-  }, [application, matter]);
 
   const currentStepIndex = useMemo(() => {
     if (!application) return -1;

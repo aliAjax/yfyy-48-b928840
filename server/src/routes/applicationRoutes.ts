@@ -12,7 +12,7 @@ import { createLog, listLogsByApplication } from '../dao/logDao';
 import { listFilesByApplication } from '../dao/fileDao';
 import { createNotification } from '../dao/notificationDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
-import { now, toJSON, calculateWarningStatus, parseFlowConfig, getCurrentStepName } from '../utils/helpers';
+import { now, toJSON, calculateWarningStatus, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep } from '../utils/helpers';
 import { ApplicationStatus, WarningStatus } from '../types';
 
 const router = Router();
@@ -42,6 +42,49 @@ function enrichApplication(app: any) {
     flowSteps,
     currentStep: currentStepName,
   };
+}
+
+function getApplicationFlow(app: any) {
+  const matter = findMatterById(app.matterId);
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  return { matter, flowSteps };
+}
+
+function getStepName(flowSteps: any[], status: ApplicationStatus): string {
+  return getCurrentStepName(flowSteps, status);
+}
+
+function ensureStepOperator(req: AuthRequest, res: any, flowSteps: any[], status: ApplicationStatus): boolean {
+  if (!req.user) return false;
+  if (canOperateStep(flowSteps, status, req.user.role)) return true;
+
+  const step = getStepByStatus(flowSteps, status);
+  res.status(403).json({
+    success: false,
+    message: step ? `当前环节需由「${step.role}」角色操作` : '当前环节无可操作角色配置',
+  });
+  return false;
+}
+
+function notifyStepUsers(
+  flowSteps: any[],
+  status: ApplicationStatus,
+  notification: {
+    type: any;
+    title: string;
+    content: string;
+    applicationId: string;
+  }
+) {
+  const step = getStepByStatus(flowSteps, status);
+  if (!step) return;
+
+  listUsers({ role: step.role }).users.forEach(u => {
+    createNotification({
+      userId: u.id,
+      ...notification,
+    });
+  });
 }
 
 router.get('/', authMiddleware, (req: AuthRequest, res) => {
@@ -136,7 +179,7 @@ router.get('/warning/list', authMiddleware, (req: AuthRequest, res) => {
 router.post('/batch/accept', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 
-  if (!['window', 'admin'].includes(req.user.role)) {
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
     res.status(403).json({ success: false, message: '权限不足' });
     return;
   }
@@ -173,10 +216,15 @@ router.post('/batch/accept', authMiddleware, (req: AuthRequest, res) => {
       return;
     }
 
-    const matter = findMatterById(app.matterId);
-    const flowSteps = parseFlowConfig(matter?.flowConfig);
-    const acceptStep = flowSteps.find(s => s.status === 'accepted');
-    const currentStepName = acceptStep ? acceptStep.name : '材料审核中';
+    const { matter, flowSteps } = getApplicationFlow(app);
+    if (!canOperateStep(flowSteps, 'submitted', req.user!.role)) {
+      resultItem.success = false;
+      resultItem.reason = '当前角色无权操作受理环节';
+      failureCount++;
+      results.push(resultItem);
+      return;
+    }
+    const currentStepName = getStepName(flowSteps, 'accepted');
 
     const oldStatus = app.status;
     app = updateApplication(app.id, {
@@ -222,7 +270,7 @@ router.post('/batch/accept', authMiddleware, (req: AuthRequest, res) => {
 router.post('/batch/supplement', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 
-  if (!['window', 'admin'].includes(req.user.role)) {
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
     res.status(403).json({ success: false, message: '权限不足' });
     return;
   }
@@ -264,9 +312,15 @@ router.post('/batch/supplement', authMiddleware, (req: AuthRequest, res) => {
     }
 
     const oldStatus = app.status;
-    const matter = findMatterById(app.matterId);
-    const flowSteps = parseFlowConfig(matter?.flowConfig);
-    const currentStepName = getCurrentStepName(flowSteps, 'supplement');
+    const { matter, flowSteps } = getApplicationFlow(app);
+    if (!canOperateStep(flowSteps, app.status, req.user!.role)) {
+      resultItem.success = false;
+      resultItem.reason = '当前角色无权操作该流程环节';
+      failureCount++;
+      results.push(resultItem);
+      return;
+    }
+    const currentStepName = getStepName(flowSteps, 'supplement');
     
     app = updateApplication(app.id, {
       status: 'supplement',
@@ -430,22 +484,23 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
     newStatus: 'submitted',
   });
 
-  const windowUsers = listUsers({ role: 'window' }).users;
-  windowUsers.forEach(u => {
-    createNotification({
-      userId: u.id,
-      type: 'submit',
-      title: '新申请待受理',
-      content: `申请人 ${currentUser.name} 提交了「${matter?.name || ''}」申请，请及时受理。`,
-      applicationId: app.id,
-    });
+  notifyStepUsers(flowSteps, 'submitted', {
+    type: 'submit',
+    title: '新申请待受理',
+    content: `申请人 ${currentUser.name} 提交了「${matter?.name || ''}」申请，请及时受理。`,
+    applicationId: app.id,
   });
 
   res.json({ success: true, data: enrichApplication(app), message: '提交成功' });
 });
 
-router.post('/:id/accept', authMiddleware, requireRole('window'), (req: AuthRequest, res) => {
+router.post('/:id/accept', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
+
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
 
   let app = findApplicationById(req.params.id);
   if (!app) {
@@ -458,10 +513,9 @@ router.post('/:id/accept', authMiddleware, requireRole('window'), (req: AuthRequ
     return;
   }
 
-  const matter = findMatterById(app.matterId);
-  const flowSteps = parseFlowConfig(matter?.flowConfig);
-  const acceptStep = flowSteps.find(s => s.status === 'accepted');
-  const currentStepName = acceptStep ? acceptStep.name : '材料审核中';
+  const { matter, flowSteps } = getApplicationFlow(app);
+  if (!ensureStepOperator(req, res, flowSteps, 'submitted')) return;
+  const currentStepName = getStepName(flowSteps, 'accepted');
 
   const oldStatus = app.status;
   app = updateApplication(app.id, {
@@ -491,8 +545,13 @@ router.post('/:id/accept', authMiddleware, requireRole('window'), (req: AuthRequ
   res.json({ success: true, data: enrichApplication(app), message: '受理成功' });
 });
 
-router.post('/:id/supplement', authMiddleware, requireRole('window'), (req: AuthRequest, res) => {
+router.post('/:id/supplement', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
+
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
 
   const { reason } = req.body;
   let app = findApplicationById(req.params.id);
@@ -507,9 +566,9 @@ router.post('/:id/supplement', authMiddleware, requireRole('window'), (req: Auth
   }
 
   const oldStatus = app.status;
-  const matter = findMatterById(app.matterId);
-  const flowSteps = parseFlowConfig(matter?.flowConfig);
-  const currentStepName = getCurrentStepName(flowSteps, 'supplement');
+  const { matter, flowSteps } = getApplicationFlow(app);
+  if (!ensureStepOperator(req, res, flowSteps, app.status)) return;
+  const currentStepName = getStepName(flowSteps, 'supplement');
   
   app = updateApplication(app.id, {
     status: 'supplement',
@@ -559,9 +618,9 @@ router.post('/:id/reject', authMiddleware, (req: AuthRequest, res) => {
   }
 
   const oldStatus = app.status;
-  const matter = findMatterById(app.matterId);
-  const flowSteps = parseFlowConfig(matter?.flowConfig);
-  const currentStepName = getCurrentStepName(flowSteps, 'rejected');
+  const { matter, flowSteps } = getApplicationFlow(app);
+  if (!ensureStepOperator(req, res, flowSteps, app.status)) return;
+  const currentStepName = getStepName(flowSteps, 'rejected');
   
   app = updateApplication(app.id, {
     status: 'rejected',
@@ -590,8 +649,13 @@ router.post('/:id/reject', authMiddleware, (req: AuthRequest, res) => {
   res.json({ success: true, data: enrichApplication(app), message: '已退回申请' });
 });
 
-router.post('/:id/send-review', authMiddleware, requireRole('window'), (req: AuthRequest, res) => {
+router.post('/:id/send-review', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
+
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
 
   let app = findApplicationById(req.params.id);
   if (!app) {
@@ -604,10 +668,9 @@ router.post('/:id/send-review', authMiddleware, requireRole('window'), (req: Aut
     return;
   }
 
-  const matter = findMatterById(app.matterId);
-  const flowSteps = parseFlowConfig(matter?.flowConfig);
-  const reviewStep = flowSteps.find(s => s.status === 'reviewing');
-  const currentStepName = reviewStep ? reviewStep.name : '审核中';
+  const { matter, flowSteps } = getApplicationFlow(app);
+  if (!ensureStepOperator(req, res, flowSteps, 'accepted')) return;
+  const currentStepName = getStepName(flowSteps, 'reviewing');
 
   const oldStatus = app.status;
   app = updateApplication(app.id, {
@@ -624,22 +687,23 @@ router.post('/:id/send-review', authMiddleware, requireRole('window'), (req: Aut
     newStatus: 'reviewing',
   });
 
-  const reviewerUsers = listUsers({ role: 'reviewer' }).users;
-  reviewerUsers.forEach(u => {
-    createNotification({
-      userId: u.id,
-      type: 'send_review',
-      title: '新申请待审核',
-      content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时处理。`,
-      applicationId: app.id,
-    });
+  notifyStepUsers(flowSteps, 'reviewing', {
+    type: 'send_review',
+    title: '新申请待审核',
+    content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时处理。`,
+    applicationId: app.id,
   });
 
   res.json({ success: true, data: enrichApplication(app), message: '已送审' });
 });
 
-router.post('/:id/review', authMiddleware, requireRole('reviewer'), (req: AuthRequest, res) => {
+router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
+
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
 
   const { opinion, pass } = req.body;
   let app = findApplicationById(req.params.id);
@@ -653,16 +717,15 @@ router.post('/:id/review', authMiddleware, requireRole('reviewer'), (req: AuthRe
     return;
   }
 
-  const matter = findMatterById(app.matterId);
-  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const { matter, flowSteps } = getApplicationFlow(app);
+  if (!ensureStepOperator(req, res, flowSteps, 'reviewing')) return;
   
   const oldStatus = app.status;
   const appId = app.id;
   const applicantId = app.applicantId;
   
   if (pass) {
-    const approvedStep = flowSteps.find(s => s.status === 'approved');
-    const currentStepName = approvedStep ? approvedStep.name : '审核通过，待办结';
+    const currentStepName = getStepName(flowSteps, 'approved');
     
     app = updateApplication(appId, {
       status: 'approved',
@@ -687,30 +750,29 @@ router.post('/:id/review', authMiddleware, requireRole('reviewer'), (req: AuthRe
       content: `您的「${matter?.name || ''}」申请已审核通过，当前环节：${currentStepName}。`,
       applicationId: appId,
     });
-    const windowUsers = listUsers({ role: 'window' }).users;
-    windowUsers.forEach(u => {
-      createNotification({
-        userId: u.id,
-        type: 'review_pass',
-        title: '申请审核通过待办结',
-        content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时办结。`,
-        applicationId: appId,
-      });
+    notifyStepUsers(flowSteps, 'approved', {
+      type: 'review_pass',
+      title: '申请审核通过待办结',
+      content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时办结。`,
+      applicationId: appId,
     });
   } else {
+    const currentStepName = getStepName(flowSteps, 'rejected');
+
     app = updateApplication(appId, {
       status: 'rejected',
       reviewOpinion: opinion,
       reviewerUserId: req.user.id,
       rejectReason: opinion,
       completeTime: now(),
+      currentStep: currentStepName,
     })!;
 
     createLog({
       applicationId: appId,
       userId: req.user.id,
       action: 'review',
-      description: `审核不通过：${opinion || ''}`,
+      description: `审核不通过，进入【${currentStepName}】环节：${opinion || ''}`,
       oldStatus,
       newStatus: 'rejected',
     });
@@ -727,8 +789,13 @@ router.post('/:id/review', authMiddleware, requireRole('reviewer'), (req: AuthRe
   res.json({ success: true, data: enrichApplication(app), message: '审核完成' });
 });
 
-router.post('/:id/complete', authMiddleware, requireRole('window'), (req: AuthRequest, res) => {
+router.post('/:id/complete', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
+
+  if (!['window', 'reviewer', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
 
   let app = findApplicationById(req.params.id);
   if (!app) {
@@ -741,10 +808,9 @@ router.post('/:id/complete', authMiddleware, requireRole('window'), (req: AuthRe
     return;
   }
 
-  const matter = findMatterById(app.matterId);
-  const flowSteps = parseFlowConfig(matter?.flowConfig);
-  const completeStep = flowSteps.find(s => s.status === 'completed');
-  const currentStepName = completeStep ? completeStep.name : '已办结';
+  const { matter, flowSteps } = getApplicationFlow(app);
+  if (!ensureStepOperator(req, res, flowSteps, 'approved')) return;
+  const currentStepName = getStepName(flowSteps, 'completed');
 
   const oldStatus = app.status;
   app = updateApplication(app.id, {

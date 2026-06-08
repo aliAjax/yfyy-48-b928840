@@ -13,10 +13,10 @@ interface FlowConfiguratorProps {
 }
 
 const statusOptions: { value: ApplicationStatus; label: string }[] = [
-  { value: 'submitted', label: '待受理' },
-  { value: 'accepted', label: '已受理' },
-  { value: 'reviewing', label: '审核中' },
-  { value: 'approved', label: '审核通过' },
+  { value: 'submitted', label: '窗口受理' },
+  { value: 'accepted', label: '材料审核' },
+  { value: 'reviewing', label: '业务审核' },
+  { value: 'approved', label: '办结' },
   { value: 'completed', label: '已办结' },
 ];
 
@@ -44,11 +44,11 @@ export default function FlowConfigurator({ value, onChange, disabled = false }: 
       } catch {}
     }
     setSteps([
-      { step: 1, name: '窗口受理', role: 'window', description: '窗口人员受理申请', status: 'accepted' },
+      { step: 1, name: '窗口受理', role: 'window', description: '窗口人员受理申请', status: 'submitted' },
       { step: 2, name: '材料审核', role: 'window', description: '窗口人员审核材料', status: 'accepted' },
       { step: 3, name: '业务审核', role: 'reviewer', description: '审核人员业务审核', status: 'reviewing' },
-      { step: 4, name: '审核通过', role: 'reviewer', description: '审核通过，待办结', status: 'approved' },
-      { step: 5, name: '办结出证', role: 'window', description: '窗口人员办结发证', status: 'completed' },
+      { step: 4, name: '办结出证', role: 'window', description: '窗口人员办结发证', status: 'approved' },
+      { step: 5, name: '已办结', role: 'window', description: '申请已办结', status: 'completed' },
     ]);
   }, [value]);
 
@@ -66,7 +66,7 @@ export default function FlowConfigurator({ value, onChange, disabled = false }: 
       name: '',
       role: 'window',
       description: '',
-      status: 'accepted',
+      status: 'submitted',
     });
     setModalVisible(true);
   };

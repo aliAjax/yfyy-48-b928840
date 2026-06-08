@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { WarningStatus, ApplicationStatus, FlowStep } from '../types';
+import { WarningStatus, ApplicationStatus, FlowStep, UserRole } from '../types';
 
 export function generateId(): string {
   return uuidv4();
@@ -65,12 +65,14 @@ export function calculateWarningStatus(
 }
 
 export const DEFAULT_FLOW_STEPS: FlowStep[] = [
-  { step: 1, name: '窗口受理', role: 'window', description: '窗口人员受理申请', status: 'accepted' },
+  { step: 1, name: '窗口受理', role: 'window', description: '窗口人员受理申请', status: 'submitted' },
   { step: 2, name: '材料审核', role: 'window', description: '窗口人员审核材料', status: 'accepted' },
   { step: 3, name: '业务审核', role: 'reviewer', description: '审核人员业务审核', status: 'reviewing' },
-  { step: 4, name: '审核通过', role: 'reviewer', description: '审核通过，待办结', status: 'approved' },
-  { step: 5, name: '办结出证', role: 'window', description: '窗口人员办结发证', status: 'completed' },
+  { step: 4, name: '办结出证', role: 'window', description: '窗口人员办结发证', status: 'approved' },
+  { step: 5, name: '已办结', role: 'window', description: '申请已办结', status: 'completed' },
 ];
+
+const LEGACY_STATUS_ORDER: ApplicationStatus[] = ['submitted', 'accepted', 'reviewing', 'approved'];
 
 export function parseFlowConfig(flowConfigStr: string | null | undefined): FlowStep[] {
   if (!flowConfigStr) return [...DEFAULT_FLOW_STEPS];
@@ -98,21 +100,15 @@ export function getStepByStatus(flowSteps: FlowStep[], status: ApplicationStatus
   
   const hasStatusField = flowSteps.some(s => s.status);
   if (!hasStatusField) {
-    const statusOrder: ApplicationStatus[] = ['submitted', 'accepted', 'reviewing', 'approved', 'completed'];
-    const statusIdx = statusOrder.indexOf(status);
+    const statusIdx = LEGACY_STATUS_ORDER.indexOf(status);
     if (statusIdx >= 0 && statusIdx < flowSteps.length) {
       return flowSteps[statusIdx];
     }
-    if (status === 'submitted' && flowSteps.length > 0) {
-      return flowSteps[0];
-    }
-    if (statusIdx >= flowSteps.length && flowSteps.length > 0) {
-      return flowSteps[flowSteps.length - 1];
-    }
+    return null;
   }
   
   if (status === 'submitted' && flowSteps.length > 0) {
-    return { ...flowSteps[0], name: '待' + flowSteps[0].name };
+    return flowSteps[0];
   }
   
   return null;
@@ -133,6 +129,16 @@ export function getCurrentStepName(flowSteps: FlowStep[], status: ApplicationSta
     completed: '已办结',
   };
   return statusNames[status] || status;
+}
+
+export function canOperateStep(
+  flowSteps: FlowStep[],
+  status: ApplicationStatus,
+  role: UserRole
+): boolean {
+  if (role === 'admin') return true;
+  const step = getStepByStatus(flowSteps, status);
+  return !!step && step.role === role;
 }
 
 export function getNextStep(flowSteps: FlowStep[], currentStatus: ApplicationStatus): FlowStep | null {

@@ -3,7 +3,7 @@ import { Table, Card, Input, Select, Button, Space, Tag, Modal, message } from '
 import { SearchOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { listApplications, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication } from '../api/applicationApi';
 import { Application, ApplicationStatus, WarningStatus } from '../types';
-import { statusLabels, statusColors, roleLabels, warningLabels, warningColors } from '../utils/common';
+import { statusLabels, statusColors, roleLabels, warningLabels, warningColors, canOperateStep } from '../utils/common';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -157,9 +157,8 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
 
   const getActionButtons = (record: Application) => {
     const buttons: JSX.Element[] = [];
-    const isWindow = user?.role === 'window';
-    const isReviewer = user?.role === 'reviewer';
-    const isAdmin = user?.role === 'admin';
+    const flowSteps = record.flowSteps || [];
+    const canOperate = (status: ApplicationStatus) => canOperateStep(flowSteps, status, user?.role);
 
     buttons.push(
       <Button type="link" onClick={() => navigate(`/applications/${record.id}`)}>
@@ -167,48 +166,43 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
       </Button>
     );
 
-    if (isWindow || isAdmin) {
-      if (record.status === 'submitted') {
-        buttons.push(
-          <Button type="link" onClick={() => handleAccept(record.id)}>
-            受理
-          </Button>
-        );
-        buttons.push(
-          <Button type="link" danger onClick={() => handleReject(record.id)}>
-            退回
-          </Button>
-        );
-      }
-      if (record.status === 'accepted') {
-        buttons.push(
-          <Button type="link" onClick={() => handleSupplement(record.id)}>
-            补正
-          </Button>
-        );
-        buttons.push(
-          <Button type="link" onClick={() => handleSendReview(record.id)}>
-            送审
-          </Button>
-        );
-      }
-      if (record.status === 'approved') {
-        buttons.push(
-          <Button type="link" onClick={() => handleComplete(record.id)}>
-            办结
-          </Button>
-        );
-      }
+    if (record.status === 'submitted' && canOperate('submitted')) {
+      buttons.push(
+        <Button type="link" onClick={() => handleAccept(record.id)}>
+          受理
+        </Button>
+      );
+      buttons.push(
+        <Button type="link" danger onClick={() => handleReject(record.id)}>
+          退回
+        </Button>
+      );
     }
-
-    if (isReviewer || isAdmin) {
-      if (record.status === 'reviewing') {
-        buttons.push(
-          <Button type="link" onClick={() => navigate(`/applications/${record.id}/review`)}>
-            审核
-          </Button>
-        );
-      }
+    if (record.status === 'accepted' && canOperate('accepted')) {
+      buttons.push(
+        <Button type="link" onClick={() => handleSupplement(record.id)}>
+          补正
+        </Button>
+      );
+      buttons.push(
+        <Button type="link" onClick={() => handleSendReview(record.id)}>
+          送审
+        </Button>
+      );
+    }
+    if (record.status === 'reviewing' && canOperate('reviewing')) {
+      buttons.push(
+        <Button type="link" onClick={() => navigate(`/applications/${record.id}/review`)}>
+          审核
+        </Button>
+      );
+    }
+    if (record.status === 'approved' && canOperate('approved')) {
+      buttons.push(
+        <Button type="link" onClick={() => handleComplete(record.id)}>
+          办结
+        </Button>
+      );
     }
 
     return buttons;

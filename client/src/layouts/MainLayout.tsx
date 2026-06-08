@@ -61,12 +61,15 @@ export default function MainLayout() {
       });
     }
 
-    if (user?.role === 'window') {
+    if (user?.role === 'window' || user?.role === 'reviewer') {
       items.push({
         key: '/batch-accept',
         icon: <SelectOutlined />,
         label: '批量受理工作台',
       });
+    }
+
+    if (user?.role === 'window') {
       items.push({
         key: '/applications',
         icon: <FileTextOutlined />,
@@ -74,7 +77,7 @@ export default function MainLayout() {
       });
     }
 
-    if (user?.role === 'reviewer') {
+    if (user?.role === 'window' || user?.role === 'reviewer') {
       items.push({
         key: '/review-applications',
         icon: <AuditOutlined />,

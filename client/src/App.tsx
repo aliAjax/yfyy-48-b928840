@@ -101,13 +101,13 @@ function AppRoutes() {
         } />
         
         <Route path="batch-accept" element={
-          <RequireRole roles={['window', 'admin']}>
+          <RequireRole roles={['window', 'reviewer', 'admin']}>
             <BatchAcceptWorkbenchPage />
           </RequireRole>
         } />
         
         <Route path="review-applications" element={
-          <RequireRole roles={['reviewer', 'admin']}>
+          <RequireRole roles={['window', 'reviewer', 'admin']}>
             <ApplicationListPage showAll reviewMode />
           </RequireRole>
         } />
@@ -119,7 +119,7 @@ function AppRoutes() {
           </RequireRole>
         } />
         <Route path="applications/:id/review" element={
-          <RequireRole roles={['reviewer', 'admin']}>
+          <RequireRole roles={['window', 'reviewer', 'admin']}>
             <ApplicationReviewPage />
           </RequireRole>
         } />

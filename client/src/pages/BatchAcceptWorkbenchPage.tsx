@@ -4,7 +4,7 @@ import { SearchOutlined, ReloadOutlined, CheckOutlined, ExclamationOutlined, Fil
 import { listApplications, batchAcceptApplications, batchSupplementApplications } from '../api/applicationApi';
 import { listMatters } from '../api/matterApi';
 import { Application, ApplicationStatus, Matter, BatchOperationResult, BatchOperationItem } from '../types';
-import { statusLabels, statusColors, safeJSONParse } from '../utils/common';
+import { statusLabels, statusColors, safeJSONParse, canOperateStep } from '../utils/common';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -231,7 +231,7 @@ export default function BatchAcceptWorkbenchPage() {
       setSelectedRowKeys(newSelectedRowKeys);
     },
     getCheckboxProps: (record: Application) => ({
-      disabled: record.status !== 'submitted',
+      disabled: record.status !== 'submitted' || !canOperateStep(record.flowSteps || [], 'submitted', user?.role),
     }),
   };
 

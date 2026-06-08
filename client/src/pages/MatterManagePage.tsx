@@ -44,10 +44,11 @@ export default function MatterManagePage() {
       { name: '身份证复印件', required: true, description: '申请人身份证正反面复印件' },
     ], null, 2));
     setFlowText(JSON.stringify([
-      { step: 1, name: '窗口受理', role: 'window', description: '窗口人员受理申请' },
-      { step: 2, name: '材料审核', role: 'window', description: '窗口人员审核材料' },
-      { step: 3, name: '业务审核', role: 'reviewer', description: '审核人员业务审核' },
-      { step: 4, name: '办结出证', role: 'window', description: '窗口人员办结发证' },
+      { step: 1, name: '窗口受理', role: 'window', status: 'submitted', description: '窗口人员受理申请' },
+      { step: 2, name: '材料审核', role: 'window', status: 'accepted', description: '窗口人员审核材料' },
+      { step: 3, name: '业务审核', role: 'reviewer', status: 'reviewing', description: '审核人员业务审核' },
+      { step: 4, name: '办结出证', role: 'window', status: 'approved', description: '窗口人员办结发证' },
+      { step: 5, name: '已办结', role: 'window', status: 'completed', description: '申请已办结' },
     ], null, 2));
     setModalVisible(true);
   };
