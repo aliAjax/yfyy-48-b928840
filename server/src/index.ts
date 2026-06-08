@@ -29,7 +29,7 @@ app.get('/api/health', (req, res) => {
 const clientDistPath = path.join(__dirname, '../../client/dist');
 if (NODE_ENV === 'production' && fs.existsSync(clientDistPath)) {
   app.use(express.static(clientDistPath));
-  
+
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api')) {
       res.sendFile(path.join(clientDistPath, 'index.html'));
