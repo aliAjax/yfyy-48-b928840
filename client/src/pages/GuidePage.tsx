@@ -392,11 +392,7 @@ export default function GuidePage() {
                         <div style={{ fontWeight: 500, marginBottom: 4 }}>
                           {step.name}
                           {step.days && (
-                            <Tag
-                              color="orange"
-                              style={{ marginLeft: 8 }}
-                              size="small"
-                            >
+                            <Tag color="orange" style={{ marginLeft: 8, fontSize: 12 }}>
                               {step.days}个工作日
                             </Tag>
                           )}

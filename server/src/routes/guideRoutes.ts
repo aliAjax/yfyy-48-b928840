@@ -6,7 +6,7 @@ const router = Router();
 
 router.get('/matters', authMiddleware, (req, res) => {
   const { department, keyword, page = 1, pageSize = 10 } = req.query;
-  
+
   const result = listMatters({
     status: 'active',
     department: department as string,
