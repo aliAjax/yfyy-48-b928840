@@ -105,7 +105,7 @@ export default function MainLayout() {
         label: `${user?.name} (${roleLabels[user?.role || 'applicant']})`,
         disabled: true,
       },
-      { type: 'divider' },
+      { type: 'divider' as const },
       {
         key: 'logout',
         icon: <LogoutOutlined />,
