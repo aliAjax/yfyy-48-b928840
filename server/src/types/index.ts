@@ -1,5 +1,13 @@
 export type UserRole = 'applicant' | 'window' | 'reviewer' | 'admin';
 
+export interface FlowStep {
+  step: number;
+  name: string;
+  role: UserRole;
+  description?: string;
+  status?: ApplicationStatus;
+}
+
 export interface User {
   id: string;
   username: string;

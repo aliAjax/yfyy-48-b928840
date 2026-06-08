@@ -12,7 +12,7 @@ import { createLog, listLogsByApplication } from '../dao/logDao';
 import { listFilesByApplication } from '../dao/fileDao';
 import { createNotification } from '../dao/notificationDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
-import { now, toJSON, calculateWarningStatus } from '../utils/helpers';
+import { now, toJSON, calculateWarningStatus, parseFlowConfig, getCurrentStepName } from '../utils/helpers';
 import { ApplicationStatus, WarningStatus } from '../types';
 
 const router = Router();
@@ -28,6 +28,9 @@ function enrichApplication(app: any) {
     app.status
   );
   
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const currentStepName = app.currentStep || getCurrentStepName(flowSteps, app.status);
+  
   return {
     ...app,
     matterName: matter?.name,
@@ -36,6 +39,8 @@ function enrichApplication(app: any) {
     warningStatus,
     remainingDays,
     promiseDays: matter?.promiseDays,
+    flowSteps,
+    currentStep: currentStepName,
   };
 }
 
@@ -168,29 +173,33 @@ router.post('/batch/accept', authMiddleware, (req: AuthRequest, res) => {
       return;
     }
 
+    const matter = findMatterById(app.matterId);
+    const flowSteps = parseFlowConfig(matter?.flowConfig);
+    const acceptStep = flowSteps.find(s => s.status === 'accepted');
+    const currentStepName = acceptStep ? acceptStep.name : '材料审核中';
+
     const oldStatus = app.status;
     app = updateApplication(app.id, {
       status: 'accepted',
       windowUserId: req.user!.id,
       acceptTime: now(),
-      currentStep: '材料审核中',
+      currentStep: currentStepName,
     })!;
 
     createLog({
       applicationId: app.id,
       userId: req.user!.id,
       action: 'accept',
-      description: '窗口批量受理申请',
+      description: `窗口批量受理申请，进入【${currentStepName}】环节`,
       oldStatus,
       newStatus: 'accepted',
     });
 
-    const matter = findMatterById(app.matterId);
     createNotification({
       userId: app.applicantId,
       type: 'accept',
       title: '申请已受理',
-      content: `您的「${matter?.name || ''}」申请已被窗口受理，正在处理中。`,
+      content: `您的「${matter?.name || ''}」申请已被窗口受理，当前环节：${currentStepName}。`,
       applicationId: app.id,
     });
 
@@ -255,21 +264,25 @@ router.post('/batch/supplement', authMiddleware, (req: AuthRequest, res) => {
     }
 
     const oldStatus = app.status;
+    const matter = findMatterById(app.matterId);
+    const flowSteps = parseFlowConfig(matter?.flowConfig);
+    const currentStepName = getCurrentStepName(flowSteps, 'supplement');
+    
     app = updateApplication(app.id, {
       status: 'supplement',
       supplementReason: reason,
+      currentStep: currentStepName,
     })!;
 
     createLog({
       applicationId: app.id,
       userId: req.user!.id,
       action: 'supplement',
-      description: `批量要求补正材料：${reason || ''}`,
+      description: `批量要求补正材料，进入【${currentStepName}】环节：${reason || ''}`,
       oldStatus,
       newStatus: 'supplement',
     });
 
-    const matter = findMatterById(app.matterId);
     createNotification({
       userId: app.applicantId,
       type: 'supplement',
@@ -354,12 +367,16 @@ router.post('/', authMiddleware, requireRole('applicant'), (req: AuthRequest, re
     return;
   }
 
+  const flowSteps = parseFlowConfig(matter.flowConfig);
+  const initialStepName = getCurrentStepName(flowSteps, 'draft');
+
   const app = createApplication({
     matterId,
     applicantId: req.user.id,
     basicInfo: basicInfo ? toJSON(basicInfo) : undefined,
     materials: materials ? toJSON(materials) : undefined,
     status: 'draft',
+    currentStep: initialStepName,
   });
 
   createLog({
@@ -392,9 +409,14 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
   }
 
   const oldStatus = app.status;
+  const matter = findMatterById(app.matterId);
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const currentStepName = getCurrentStepName(flowSteps, 'submitted');
+  
   app = updateApplication(app.id, {
     status: 'submitted',
     submitTime: now(),
+    currentStep: currentStepName,
   })!;
 
   const currentUser = req.user;
@@ -403,12 +425,11 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
     applicationId: app.id,
     userId: currentUser.id,
     action: 'submit',
-    description: '提交申请，等待窗口受理',
+    description: `提交申请，进入【${currentStepName}】环节`,
     oldStatus,
     newStatus: 'submitted',
   });
 
-  const matter = findMatterById(app.matterId);
   const windowUsers = listUsers({ role: 'window' }).users;
   windowUsers.forEach(u => {
     createNotification({
@@ -437,29 +458,33 @@ router.post('/:id/accept', authMiddleware, requireRole('window'), (req: AuthRequ
     return;
   }
 
+  const matter = findMatterById(app.matterId);
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const acceptStep = flowSteps.find(s => s.status === 'accepted');
+  const currentStepName = acceptStep ? acceptStep.name : '材料审核中';
+
   const oldStatus = app.status;
   app = updateApplication(app.id, {
     status: 'accepted',
     windowUserId: req.user.id,
     acceptTime: now(),
-    currentStep: '材料审核中',
+    currentStep: currentStepName,
   })!;
 
   createLog({
     applicationId: app.id,
     userId: req.user.id,
     action: 'accept',
-    description: '窗口受理申请',
+    description: `窗口受理申请，进入【${currentStepName}】环节`,
     oldStatus,
     newStatus: 'accepted',
   });
 
-  const matter = findMatterById(app.matterId);
   createNotification({
     userId: app.applicantId,
     type: 'accept',
     title: '申请已受理',
-    content: `您的「${matter?.name || ''}」申请已被窗口受理，正在处理中。`,
+    content: `您的「${matter?.name || ''}」申请已被窗口受理，当前环节：${currentStepName}。`,
     applicationId: app.id,
   });
 
@@ -482,21 +507,25 @@ router.post('/:id/supplement', authMiddleware, requireRole('window'), (req: Auth
   }
 
   const oldStatus = app.status;
+  const matter = findMatterById(app.matterId);
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const currentStepName = getCurrentStepName(flowSteps, 'supplement');
+  
   app = updateApplication(app.id, {
     status: 'supplement',
     supplementReason: reason,
+    currentStep: currentStepName,
   })!;
 
   createLog({
     applicationId: app.id,
     userId: req.user.id,
     action: 'supplement',
-    description: `要求补正材料：${reason || ''}`,
+    description: `要求补正材料，进入【${currentStepName}】环节：${reason || ''}`,
     oldStatus,
     newStatus: 'supplement',
   });
 
-  const matter = findMatterById(app.matterId);
   createNotification({
     userId: app.applicantId,
     type: 'supplement',
@@ -530,22 +559,26 @@ router.post('/:id/reject', authMiddleware, (req: AuthRequest, res) => {
   }
 
   const oldStatus = app.status;
+  const matter = findMatterById(app.matterId);
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const currentStepName = getCurrentStepName(flowSteps, 'rejected');
+  
   app = updateApplication(app.id, {
     status: 'rejected',
     rejectReason: reason,
     completeTime: now(),
+    currentStep: currentStepName,
   })!;
 
   createLog({
     applicationId: app.id,
     userId: req.user.id,
     action: 'reject',
-    description: `申请被退回：${reason || ''}`,
+    description: `申请被退回，进入【${currentStepName}】环节：${reason || ''}`,
     oldStatus,
     newStatus: 'rejected',
   });
 
-  const matter = findMatterById(app.matterId);
   createNotification({
     userId: app.applicantId,
     type: 'reject',
@@ -571,29 +604,33 @@ router.post('/:id/send-review', authMiddleware, requireRole('window'), (req: Aut
     return;
   }
 
+  const matter = findMatterById(app.matterId);
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const reviewStep = flowSteps.find(s => s.status === 'reviewing');
+  const currentStepName = reviewStep ? reviewStep.name : '审核中';
+
   const oldStatus = app.status;
   app = updateApplication(app.id, {
     status: 'reviewing',
-    currentStep: '审核中',
+    currentStep: currentStepName,
   })!;
 
   createLog({
     applicationId: app.id,
     userId: req.user.id,
     action: 'send_review',
-    description: '材料审核通过，送交审核人员',
+    description: `材料审核通过，送交审核人员，进入【${currentStepName}】环节`,
     oldStatus,
     newStatus: 'reviewing',
   });
 
-  const matter = findMatterById(app.matterId);
   const reviewerUsers = listUsers({ role: 'reviewer' }).users;
   reviewerUsers.forEach(u => {
     createNotification({
       userId: u.id,
       type: 'send_review',
       title: '新申请待审核',
-      content: `窗口已将「${matter?.name || ''}」申请送交审核，请及时处理。`,
+      content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时处理。`,
       applicationId: app.id,
     });
   });
@@ -616,41 +653,39 @@ router.post('/:id/review', authMiddleware, requireRole('reviewer'), (req: AuthRe
     return;
   }
 
+  const matter = findMatterById(app.matterId);
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  
   const oldStatus = app.status;
+  const appId = app.id;
+  const applicantId = app.applicantId;
+  
   if (pass) {
-    app = updateApplication(app.id, {
+    const approvedStep = flowSteps.find(s => s.status === 'approved');
+    const currentStepName = approvedStep ? approvedStep.name : '审核通过，待办结';
+    
+    app = updateApplication(appId, {
       status: 'approved',
       reviewOpinion: opinion,
       reviewerUserId: req.user.id,
-      currentStep: '审核通过，待办结',
+      currentStep: currentStepName,
     })!;
-  } else {
-    app = updateApplication(app.id, {
-      status: 'rejected',
-      reviewOpinion: opinion,
-      reviewerUserId: req.user.id,
-      rejectReason: opinion,
-      completeTime: now(),
-    })!;
-  }
 
-  createLog({
-    applicationId: app.id,
-    userId: req.user.id,
-    action: 'review',
-    description: `审核${pass ? '通过' : '不通过'}：${opinion || ''}`,
-    oldStatus,
-    newStatus: pass ? 'approved' : 'rejected',
-  });
+    createLog({
+      applicationId: appId,
+      userId: req.user.id,
+      action: 'review',
+      description: `审核通过，进入【${currentStepName}】环节：${opinion || ''}`,
+      oldStatus,
+      newStatus: 'approved',
+    });
 
-  const matter = findMatterById(app.matterId);
-  if (pass) {
     createNotification({
-      userId: app.applicantId,
+      userId: applicantId,
       type: 'review_pass',
       title: '审核通过',
-      content: `您的「${matter?.name || ''}」申请已审核通过，等待办结。`,
-      applicationId: app.id,
+      content: `您的「${matter?.name || ''}」申请已审核通过，当前环节：${currentStepName}。`,
+      applicationId: appId,
     });
     const windowUsers = listUsers({ role: 'window' }).users;
     windowUsers.forEach(u => {
@@ -658,17 +693,34 @@ router.post('/:id/review', authMiddleware, requireRole('reviewer'), (req: AuthRe
         userId: u.id,
         type: 'review_pass',
         title: '申请审核通过待办结',
-        content: `「${matter?.name || ''}」申请已审核通过，请及时办结。`,
-        applicationId: app.id,
+        content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时办结。`,
+        applicationId: appId,
       });
     });
   } else {
+    app = updateApplication(appId, {
+      status: 'rejected',
+      reviewOpinion: opinion,
+      reviewerUserId: req.user.id,
+      rejectReason: opinion,
+      completeTime: now(),
+    })!;
+
+    createLog({
+      applicationId: appId,
+      userId: req.user.id,
+      action: 'review',
+      description: `审核不通过：${opinion || ''}`,
+      oldStatus,
+      newStatus: 'rejected',
+    });
+
     createNotification({
-      userId: app.applicantId,
+      userId: applicantId,
       type: 'review_reject',
       title: '审核不通过',
       content: `您的「${matter?.name || ''}」申请审核不通过，原因：${opinion || ''}`,
-      applicationId: app.id,
+      applicationId: appId,
     });
   }
 
@@ -689,28 +741,32 @@ router.post('/:id/complete', authMiddleware, requireRole('window'), (req: AuthRe
     return;
   }
 
+  const matter = findMatterById(app.matterId);
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const completeStep = flowSteps.find(s => s.status === 'completed');
+  const currentStepName = completeStep ? completeStep.name : '已办结';
+
   const oldStatus = app.status;
   app = updateApplication(app.id, {
     status: 'completed',
     completeTime: now(),
-    currentStep: '已办结',
+    currentStep: currentStepName,
   })!;
 
   createLog({
     applicationId: app.id,
     userId: req.user.id,
     action: 'complete',
-    description: '申请已办结',
+    description: `申请已办结，进入【${currentStepName}】环节`,
     oldStatus,
     newStatus: 'completed',
   });
 
-  const matter = findMatterById(app.matterId);
   createNotification({
     userId: app.applicantId,
     type: 'complete',
     title: '申请已办结',
-    content: `您的「${matter?.name || ''}」申请已办结，请前往办理结果。`,
+    content: `您的「${matter?.name || ''}」申请已办结，当前环节：${currentStepName}。`,
     applicationId: app.id,
   });
 

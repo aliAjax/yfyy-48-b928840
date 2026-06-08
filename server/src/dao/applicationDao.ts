@@ -105,14 +105,15 @@ export function createApplication(data: {
   basicInfo?: string;
   materials?: string;
   status?: ApplicationStatus;
+  currentStep?: string;
 }): Application {
   const id = generateId();
   const createdAt = now();
   const applicationNo = generateApplicationNo();
 
   db.prepare(`
-    INSERT INTO applications (id, application_no, matter_id, applicant_id, basic_info, materials, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO applications (id, application_no, matter_id, applicant_id, basic_info, materials, status, current_step, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     applicationNo,
@@ -121,6 +122,7 @@ export function createApplication(data: {
     data.basicInfo || '{}',
     data.materials || '[]',
     data.status || 'draft',
+    data.currentStep || null,
     createdAt,
     createdAt,
   );

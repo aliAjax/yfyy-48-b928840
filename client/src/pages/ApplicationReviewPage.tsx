@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider } from 'antd';
-import { ArrowLeftOutlined, FileTextOutlined } from '@ant-design/icons';
+import { useEffect, useState, useMemo } from 'react';
+import { Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider, Steps, Tooltip } from 'antd';
+import { ArrowLeftOutlined, FileTextOutlined, UserOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, reviewApplication } from '../api/applicationApi';
-import { Application } from '../types';
-import { statusLabels, statusColors, formatFileSize, safeJSONParse } from '../utils/common';
+import { Application, FlowStep } from '../types';
+import { statusLabels, statusColors, formatFileSize, safeJSONParse, parseFlowConfig, roleLabels } from '../utils/common';
 import { getDownloadUrl } from '../api/fileApi';
 import dayjs from 'dayjs';
 
@@ -56,6 +56,47 @@ export default function ApplicationReviewPage() {
 
   const basicInfo = application ? safeJSONParse<Record<string, any>>(application.basicInfo, {}) : {};
 
+  const flowSteps: FlowStep[] = useMemo(() => {
+    if (application?.flowSteps && application.flowSteps.length > 0) {
+      return application.flowSteps;
+    }
+    return parseFlowConfig(null);
+  }, [application]);
+
+  const currentStepIndex = useMemo(() => {
+    if (!application) return -1;
+    const status = application.status;
+    
+    const hasStatusField = flowSteps.some(s => s.status);
+    if (hasStatusField) {
+      let maxCompletedStep = -1;
+      flowSteps.forEach((step, idx) => {
+        if (step.status === 'accepted' && (status === 'accepted' || status === 'reviewing' || status === 'approved' || status === 'completed')) {
+          maxCompletedStep = Math.max(maxCompletedStep, idx);
+        }
+        if (step.status === 'reviewing' && (status === 'reviewing' || status === 'approved' || status === 'completed')) {
+          maxCompletedStep = Math.max(maxCompletedStep, idx);
+        }
+        if (step.status === 'approved' && (status === 'approved' || status === 'completed')) {
+          maxCompletedStep = Math.max(maxCompletedStep, idx);
+        }
+        if (step.status === 'completed' && status === 'completed') {
+          maxCompletedStep = Math.max(maxCompletedStep, idx);
+        }
+      });
+      return maxCompletedStep;
+    } else {
+      if (status === 'draft' || status === 'submitted') return -1;
+      if (status === 'rejected') return flowSteps.length - 1;
+      if (status === 'completed') return flowSteps.length - 1;
+      if (status === 'supplement') return 0;
+      if (status === 'accepted') return Math.min(1, flowSteps.length - 1);
+      if (status === 'reviewing') return Math.min(2, flowSteps.length - 1);
+      if (status === 'approved') return Math.min(flowSteps.length - 2, flowSteps.length - 1);
+      return -1;
+    }
+  }, [application, flowSteps]);
+
   if (!application && !loading) {
     return <div style={{ textAlign: 'center', padding: 40 }}>申请不存在</div>;
   }
@@ -67,6 +108,43 @@ export default function ApplicationReviewPage() {
           返回
         </Button>
       </Space>
+
+      <Card title="办理流程" style={{ marginBottom: 16 }}>
+        <Steps
+          direction="horizontal"
+          current={currentStepIndex >= 0 ? currentStepIndex : 0}
+          status={currentStepIndex >= 0 ? 'process' : 'wait'}
+          items={flowSteps.map((step) => ({
+            title: (
+              <Tooltip title={step.description || step.name}>
+                <span>{step.name}</span>
+              </Tooltip>
+            ),
+            description: (
+              <Tooltip title={`可操作角色：${roleLabels[step.role]}`}>
+                <span style={{ fontSize: 12, color: '#999' }}>
+                  <UserOutlined style={{ marginRight: 4 }} />
+                  {roleLabels[step.role]}
+                </span>
+              </Tooltip>
+            ),
+          }))}
+        />
+        {application?.status === 'rejected' && (
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <Tag color="red" style={{ fontSize: 14, padding: '4px 12px' }}>
+              申请已被退回
+            </Tag>
+          </div>
+        )}
+        {application?.status === 'supplement' && (
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <Tag color="orange" style={{ fontSize: 14, padding: '4px 12px' }}>
+              待补正材料
+            </Tag>
+          </div>
+        )}
+      </Card>
 
       <Card title="审核申请" style={{ marginBottom: 16 }}>
         <Descriptions bordered column={2} size="small">

@@ -1,4 +1,4 @@
-import { ApplicationStatus, User, UserRole, WarningStatus } from '../types';
+import { ApplicationStatus, User, UserRole, WarningStatus, FlowStep } from '../types';
 
 export const statusLabels: Record<ApplicationStatus, string> = {
   draft: '草稿',
@@ -88,4 +88,64 @@ export function safeJSONParse<T>(str: string | undefined | null, defaultValue: T
   } catch {
     return defaultValue;
   }
+}
+
+export const DEFAULT_FLOW_STEPS: FlowStep[] = [
+  { step: 1, name: '窗口受理', role: 'window', description: '窗口人员受理申请', status: 'accepted' },
+  { step: 2, name: '材料审核', role: 'window', description: '窗口人员审核材料', status: 'accepted' },
+  { step: 3, name: '业务审核', role: 'reviewer', description: '审核人员业务审核', status: 'reviewing' },
+  { step: 4, name: '审核通过', role: 'reviewer', description: '审核通过，待办结', status: 'approved' },
+  { step: 5, name: '办结出证', role: 'window', description: '窗口人员办结发证', status: 'completed' },
+];
+
+export function parseFlowConfig(flowConfigStr: string | null | undefined): FlowStep[] {
+  if (!flowConfigStr) return [...DEFAULT_FLOW_STEPS];
+  try {
+    const parsed = JSON.parse(flowConfigStr);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return [...DEFAULT_FLOW_STEPS];
+    }
+    const steps = parsed.map((s: any, idx: number) => ({
+      step: s.step || idx + 1,
+      name: s.name || `步骤${idx + 1}`,
+      role: s.role || 'window',
+      description: s.description || '',
+      status: s.status,
+    }));
+    return steps.sort((a, b) => a.step - b.step);
+  } catch {
+    return [...DEFAULT_FLOW_STEPS];
+  }
+}
+
+export function getStepByStatus(flowSteps: FlowStep[], status: ApplicationStatus): FlowStep | null {
+  const matchingSteps = flowSteps.filter(s => s.status === status);
+  if (matchingSteps.length > 0) return matchingSteps[0];
+  
+  const hasStatusField = flowSteps.some(s => s.status);
+  if (!hasStatusField) {
+    const statusOrder: ApplicationStatus[] = ['submitted', 'accepted', 'reviewing', 'approved', 'completed'];
+    const statusIdx = statusOrder.indexOf(status);
+    if (statusIdx >= 0 && statusIdx < flowSteps.length) {
+      return flowSteps[statusIdx];
+    }
+    if (status === 'submitted' && flowSteps.length > 0) {
+      return flowSteps[0];
+    }
+    if (statusIdx >= flowSteps.length && flowSteps.length > 0) {
+      return flowSteps[flowSteps.length - 1];
+    }
+  }
+  
+  if (status === 'submitted' && flowSteps.length > 0) {
+    return { ...flowSteps[0], name: '待' + flowSteps[0].name };
+  }
+  
+  return null;
+}
+
+export function getCurrentStepName(flowSteps: FlowStep[], status: ApplicationStatus): string {
+  const step = getStepByStatus(flowSteps, status);
+  if (step) return step.name;
+  return statusLabels[status] || status;
 }

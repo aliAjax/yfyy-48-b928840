@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Card, Descriptions, Tag, Timeline, Button, Space, List, Modal, message, Input, Upload } from 'antd';
-import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Tag, Timeline, Button, Space, List, Modal, message, Input, Upload, Steps, Tooltip } from 'antd';
+import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, UserOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, getApplicationLogs, submitApplication, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication, reviewApplication } from '../api/applicationApi';
-import { warningLabels, warningColors } from '../utils/common';
+import { warningLabels, warningColors, parseFlowConfig, roleLabels, DEFAULT_FLOW_STEPS } from '../utils/common';
 import { getMatter } from '../api/matterApi';
-import { Application, OperationLog, MaterialFile, ApplicationStatus, ApplicationMaterial, MatterMaterial } from '../types';
+import { Application, OperationLog, MaterialFile, ApplicationStatus, ApplicationMaterial, MatterMaterial, FlowStep } from '../types';
 import { statusLabels, statusColors, formatFileSize, safeJSONParse, actionLabels } from '../utils/common';
 import { useAuth } from '../context/AuthContext';
 import dayjs from 'dayjs';
@@ -249,6 +249,64 @@ export default function ApplicationDetailPage() {
   const requiredCount = useMemo(() => displayMaterials.filter(m => m.required).length, [displayMaterials]);
   const requiredCheckedCount = useMemo(() => displayMaterials.filter(m => m.required && m.checked).length, [displayMaterials]);
 
+  const flowSteps = useMemo((): FlowStep[] => {
+    if (application?.flowSteps && application.flowSteps.length > 0) {
+      return application.flowSteps;
+    }
+    if (matter?.flowConfig) {
+      return parseFlowConfig(matter.flowConfig);
+    }
+    return [...DEFAULT_FLOW_STEPS];
+  }, [application, matter]);
+
+  const currentStepIndex = useMemo(() => {
+    if (!application) return -1;
+    const status = application.status;
+    
+    const statusOrder: ApplicationStatus[] = [
+      'draft', 'submitted', 'accepted', 'reviewing', 'approved', 'completed'
+    ];
+    const statusIndex = statusOrder.indexOf(status);
+    
+    const hasStatusField = flowSteps.some(s => s.status);
+    
+    if (hasStatusField) {
+      let maxCompletedStep = -1;
+      flowSteps.forEach((step, idx) => {
+        if (step.status) {
+          const stepStatusIdx = statusOrder.indexOf(step.status);
+          if (stepStatusIdx !== -1 && stepStatusIdx <= statusIndex) {
+            maxCompletedStep = idx;
+          }
+        }
+      });
+      return maxCompletedStep;
+    } else {
+      if (status === 'draft' || status === 'submitted') {
+        return -1;
+      }
+      if (status === 'rejected') {
+        return flowSteps.length - 1;
+      }
+      if (status === 'completed') {
+        return flowSteps.length - 1;
+      }
+      if (status === 'supplement') {
+        return 0;
+      }
+      if (status === 'accepted') {
+        return Math.min(1, flowSteps.length - 1);
+      }
+      if (status === 'reviewing') {
+        return Math.min(2, flowSteps.length - 1);
+      }
+      if (status === 'approved') {
+        return Math.min(flowSteps.length - 2, flowSteps.length - 1);
+      }
+      return -1;
+    }
+  }, [application, flowSteps]);
+
   if (!application && !loading) {
     return <div style={{ textAlign: 'center', padding: 40 }}>申请不存在</div>;
   }
@@ -261,6 +319,43 @@ export default function ApplicationDetailPage() {
         </Button>
         <Space>{getActionButtons()}</Space>
       </Space>
+
+      <Card title="办理流程" style={{ marginBottom: 16 }}>
+        <Steps
+          direction="horizontal"
+          current={currentStepIndex >= 0 ? currentStepIndex : 0}
+          status={currentStepIndex >= 0 ? 'process' : 'wait'}
+          items={flowSteps.map((step) => ({
+            title: (
+              <Tooltip title={step.description || step.name}>
+                <span>{step.name}</span>
+              </Tooltip>
+            ),
+            description: (
+              <Tooltip title={`可操作角色：${roleLabels[step.role]}`}>
+                <span style={{ fontSize: 12, color: '#999' }}>
+                  <UserOutlined style={{ marginRight: 4 }} />
+                  {roleLabels[step.role]}
+                </span>
+              </Tooltip>
+            ),
+          }))}
+        />
+        {application?.status === 'rejected' && (
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <Tag color="red" style={{ fontSize: 14, padding: '4px 12px' }}>
+              申请已被退回
+            </Tag>
+          </div>
+        )}
+        {application?.status === 'supplement' && (
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <Tag color="orange" style={{ fontSize: 14, padding: '4px 12px' }}>
+              待补正材料
+            </Tag>
+          </div>
+        )}
+      </Card>
 
       <Card title="申请基本信息" style={{ marginBottom: 16 }}>
         <Descriptions bordered column={2} size="small">

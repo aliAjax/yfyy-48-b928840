@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Switch, Tag } from 'antd';
+import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Switch, Tag, Tabs } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { listMatters, createMatter, updateMatter, deleteMatter, getMatter } from '../api/matterApi';
 import { Matter } from '../types';
 import { safeJSONParse } from '../utils/common';
+import FlowConfigurator from '../components/FlowConfigurator';
 
 const { TextArea } = Input;
 
@@ -87,7 +88,6 @@ export default function MatterManagePage() {
       const values = await form.validateFields();
 
       let materialsParsed: any[] = [];
-      let flowParsed: any[] = [];
 
       try {
         materialsParsed = JSON.parse(materialsText);
@@ -95,17 +95,11 @@ export default function MatterManagePage() {
         message.error('所需材料JSON格式错误');
         return;
       }
-      try {
-        flowParsed = JSON.parse(flowText);
-      } catch {
-        message.error('流程配置JSON格式错误');
-        return;
-      }
 
       const data = {
         ...values,
         requiredMaterials: JSON.stringify(materialsParsed),
-        flowConfig: JSON.stringify(flowParsed),
+        flowConfig: flowText,
       };
 
       if (editingId) {
@@ -217,7 +211,7 @@ export default function MatterManagePage() {
         open={modalVisible}
         onCancel={() => setModalVisible(false)}
         onOk={handleSubmit}
-        width={700}
+        width={800}
         okText="保存"
       >
         <Form form={form} layout="vertical">
@@ -282,26 +276,47 @@ export default function MatterManagePage() {
               extra="数组格式，每项包含 name、required、description 字段"
             >
               <TextArea
-                rows={6}
+                rows={4}
                 value={materialsText}
                 onChange={(e) => setMaterialsText(e.target.value)}
                 placeholder='[{"name": "材料名", "required": true, "description": "说明"}]'
                 style={{ fontFamily: 'monospace' }}
               />
             </Form.Item>
-            <Form.Item
-              label="办理流程（JSON格式）"
-              style={{ marginBottom: 0 }}
-              extra="数组格式，每项包含 step、name、role、description 字段"
-            >
-              <TextArea
-                rows={6}
-                value={flowText}
-                onChange={(e) => setFlowText(e.target.value)}
-                placeholder='[{"step": 1, "name": "步骤名", "role": "window", "description": "说明"}]'
-                style={{ fontFamily: 'monospace' }}
-              />
-            </Form.Item>
+            <Tabs
+              defaultActiveKey="visual"
+              items={[
+                {
+                  key: 'visual',
+                  label: '可视化配置',
+                  children: (
+                    <FlowConfigurator
+                      value={flowText}
+                      onChange={(val) => setFlowText(val)}
+                    />
+                  ),
+                },
+                {
+                  key: 'json',
+                  label: 'JSON编辑',
+                  children: (
+                    <Form.Item
+                      label="办理流程（JSON格式）"
+                      style={{ marginBottom: 0 }}
+                      extra="数组格式，每项包含 step、name、role、status、description 字段"
+                    >
+                      <TextArea
+                        rows={8}
+                        value={flowText}
+                        onChange={(e) => setFlowText(e.target.value)}
+                        placeholder='[{"step": 1, "name": "步骤名", "role": "window", "status": "accepted", "description": "说明"}]'
+                        style={{ fontFamily: 'monospace' }}
+                      />
+                    </Form.Item>
+                  ),
+                },
+              ]}
+            />
           </Space>
         </Form>
       </Modal>
