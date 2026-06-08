@@ -165,7 +165,12 @@ export function getDepartmentStats(params: StatsFilterParams): DepartmentStatsIt
       m.department as department,
       COUNT(*) as totalCount,
       SUM(CASE WHEN a.status IN ('approved', 'completed') THEN 1 ELSE 0 END) as approvedCount,
-      SUM(CASE WHEN a.status = 'rejected' THEN 1 ELSE 0 END) as rejectedCount
+      SUM(CASE WHEN a.status = 'rejected' THEN 1 ELSE 0 END) as rejectedCount,
+      AVG(CASE
+        WHEN a.complete_time IS NOT NULL AND a.submit_time IS NOT NULL
+        THEN julianday(a.complete_time) - julianday(a.submit_time)
+        ELSE NULL
+      END) as avgDuration
     FROM applications a
     LEFT JOIN matters m ON a.matter_id = m.id
     ${where}
@@ -178,12 +183,15 @@ export function getDepartmentStats(params: StatsFilterParams): DepartmentStatsIt
   return rows.map(row => {
     const totalCount = row.totalCount || 0;
     const approvedCount = row.approvedCount || 0;
+    const rejectedCount = row.rejectedCount || 0;
     return {
       department: row.department || '未分类',
       totalCount,
       approvedCount,
-      rejectedCount: row.rejectedCount || 0,
+      rejectedCount,
       approvalRate: totalCount > 0 ? Number(((approvedCount / totalCount) * 100).toFixed(2)) : 0,
+      rejectionRate: totalCount > 0 ? Number(((rejectedCount / totalCount) * 100).toFixed(2)) : 0,
+      avgDuration: row.avgDuration ? Number(row.avgDuration.toFixed(2)) : 0,
     };
   });
 }
@@ -194,20 +202,38 @@ export function getStatusStats(params: StatsFilterParams): StatusStatsItem[] {
   const sql = `
     SELECT
       a.status as status,
-      COUNT(*) as count
+      COUNT(*) as totalCount,
+      SUM(CASE WHEN a.status IN ('approved', 'completed') THEN 1 ELSE 0 END) as approvedCount,
+      SUM(CASE WHEN a.status = 'rejected' THEN 1 ELSE 0 END) as rejectedCount,
+      AVG(CASE
+        WHEN a.complete_time IS NOT NULL AND a.submit_time IS NOT NULL
+        THEN julianday(a.complete_time) - julianday(a.submit_time)
+        ELSE NULL
+      END) as avgDuration
     FROM applications a
     LEFT JOIN matters m ON a.matter_id = m.id
     ${where}
     GROUP BY a.status
-    ORDER BY count DESC
+    ORDER BY totalCount DESC
   `;
 
   const rows: any[] = db.prepare(sql).all(...values);
 
-  return rows.map(row => ({
-    status: row.status,
-    count: row.count || 0,
-  }));
+  return rows.map(row => {
+    const totalCount = row.totalCount || 0;
+    const approvedCount = row.approvedCount || 0;
+    const rejectedCount = row.rejectedCount || 0;
+    return {
+      status: row.status,
+      count: totalCount,
+      totalCount,
+      approvedCount,
+      rejectedCount,
+      approvalRate: totalCount > 0 ? Number(((approvedCount / totalCount) * 100).toFixed(2)) : 0,
+      rejectionRate: totalCount > 0 ? Number(((rejectedCount / totalCount) * 100).toFixed(2)) : 0,
+      avgDuration: row.avgDuration ? Number(row.avgDuration.toFixed(2)) : 0,
+    };
+  });
 }
 
 export function getDepartmentList(): string[] {

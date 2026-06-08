@@ -648,6 +648,70 @@ export default function StatisticsPage() {
     },
   ];
 
+  const statusStatsColumns = [
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 120,
+      render: (val: string) => (
+        <Tag color={statusColors[val as keyof typeof statusColors] as any}>
+          {statusLabels[val as keyof typeof statusLabels] || val}
+        </Tag>
+      ),
+    },
+    {
+      title: '申请数量',
+      dataIndex: 'totalCount',
+      key: 'totalCount',
+      width: 100,
+      sorter: (a: StatusStatsItem, b: StatusStatsItem) => a.totalCount - b.totalCount,
+    },
+    {
+      title: '通过数',
+      dataIndex: 'approvedCount',
+      key: 'approvedCount',
+      width: 90,
+      render: (val: number) => <Tag color="success">{val}</Tag>,
+    },
+    {
+      title: '退回数',
+      dataIndex: 'rejectedCount',
+      key: 'rejectedCount',
+      width: 90,
+      render: (val: number) => <Tag color="error">{val}</Tag>,
+    },
+    {
+      title: '通过率',
+      dataIndex: 'approvalRate',
+      key: 'approvalRate',
+      width: 170,
+      render: (val: number) => (
+        <Progress
+          percent={val}
+          size="small"
+          status={val >= 80 ? 'success' : val >= 50 ? 'normal' : 'exception'}
+        />
+      ),
+    },
+    {
+      title: '退回率',
+      dataIndex: 'rejectionRate',
+      key: 'rejectionRate',
+      width: 170,
+      render: (val: number) => (
+        <Progress percent={val} size="small" status="exception" />
+      ),
+    },
+    {
+      title: '平均办理时长(天)',
+      dataIndex: 'avgDuration',
+      key: 'avgDuration',
+      width: 140,
+      render: (val: number) => val || '-',
+    },
+  ];
+
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
@@ -863,6 +927,16 @@ export default function StatisticsPage() {
               </Card>
             </Col>
           </Row>
+
+          <Card loading={loading} title="状态办理明细">
+            <Table
+              dataSource={statusStats}
+              columns={statusStatsColumns}
+              rowKey="status"
+              pagination={false}
+              size="middle"
+            />
+          </Card>
         </TabPane>
 
         <TabPane
@@ -930,7 +1004,7 @@ export default function StatisticsPage() {
                   title: '通过率',
                   dataIndex: 'approvalRate',
                   key: 'approvalRate',
-                  width: 200,
+                  width: 170,
                   render: (val: number) => (
                     <Progress
                       percent={val}
@@ -938,6 +1012,22 @@ export default function StatisticsPage() {
                       status={val >= 80 ? 'success' : val >= 50 ? 'normal' : 'exception'}
                     />
                   ),
+                },
+                {
+                  title: '退回率',
+                  dataIndex: 'rejectionRate',
+                  key: 'rejectionRate',
+                  width: 170,
+                  render: (val: number) => (
+                    <Progress percent={val} size="small" status="exception" />
+                  ),
+                },
+                {
+                  title: '平均办理时长(天)',
+                  dataIndex: 'avgDuration',
+                  key: 'avgDuration',
+                  width: 140,
+                  render: (val: number) => val || '-',
                 },
               ]}
             />

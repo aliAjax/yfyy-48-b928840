@@ -210,11 +210,19 @@ export interface DepartmentStatsItem {
   approvedCount: number;
   rejectedCount: number;
   approvalRate: number;
+  rejectionRate: number;
+  avgDuration: number;
 }
 
 export interface StatusStatsItem {
   status: string;
   count: number;
+  totalCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  approvalRate: number;
+  rejectionRate: number;
+  avgDuration: number;
 }
 
 export interface UserStatsItem {
