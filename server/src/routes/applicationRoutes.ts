@@ -84,6 +84,12 @@ function notifyStepUsers(
   });
 }
 
+function getOperatorUserId(req: AuthRequest): string | undefined {
+  const operatorUserId = req.query.operatorUserId as string | undefined;
+  if (!operatorUserId) return undefined;
+  return req.user && ['window', 'admin'].includes(req.user.role) ? operatorUserId : undefined;
+}
+
 router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
   
@@ -93,12 +99,14 @@ router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (req.user.role === 'applicant') {
     applicantId = req.user.id;
   }
+  const operatorUserId = getOperatorUserId(req);
 
   const result = listApplications({
     applicantId,
     matterId: matterId as string,
     status: status as ApplicationStatus,
     keyword: keyword as string,
+    operatorUserId,
   });
 
   let enriched = result.applications.map(enrichApplication);
@@ -132,10 +140,12 @@ router.get('/warning/list', authMiddleware, (req: AuthRequest, res) => {
   if (req.user.role === 'applicant') {
     applicantId = req.user.id;
   }
+  const operatorUserId = getOperatorUserId(req);
 
   const result = listApplications({
     applicantId,
     keyword: keyword as string,
+    operatorUserId,
   });
 
   let enriched = result.applications.map(enrichApplication);
@@ -171,6 +181,22 @@ router.get('/warning/list', authMiddleware, (req: AuthRequest, res) => {
     data: paged,
     total,
   });
+});
+
+router.get('/operators', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  if (!['window', 'admin'].includes(req.user.role)) {
+    res.status(403).json({ success: false, message: '权限不足' });
+    return;
+  }
+
+  const users = [
+    ...listUsers({ role: 'window' }).users,
+    ...listUsers({ role: 'reviewer' }).users,
+  ].map(({ password, ...user }) => user);
+
+  res.json({ success: true, data: users });
 });
 
 router.post('/batch/accept', authMiddleware, (req: AuthRequest, res) => {
@@ -365,9 +391,11 @@ router.get('/warning/stats', authMiddleware, (req: AuthRequest, res) => {
   if (req.user.role === 'applicant') {
     applicantId = req.user.id;
   }
+  const operatorUserId = getOperatorUserId(req);
 
   const result = listApplications({
     applicantId,
+    operatorUserId,
   });
 
   const enriched = result.applications.map(enrichApplication);

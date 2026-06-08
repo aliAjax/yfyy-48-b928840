@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Table, Card, Input, Select, Button, Space, Tag, Modal, message } from 'antd';
 import { SearchOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
-import { listApplications, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication } from '../api/applicationApi';
-import { Application, ApplicationStatus, WarningStatus } from '../types';
+import { listApplications, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication, listApplicationOperators } from '../api/applicationApi';
+import { Application, ApplicationStatus, WarningStatus, User } from '../types';
 import { statusLabels, statusColors, roleLabels, warningLabels, warningColors, canOperateStep } from '../utils/common';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -22,12 +22,15 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [warningFilter, setWarningFilter] = useState<string>('');
+  const [operatorFilter, setOperatorFilter] = useState<string>('');
+  const [operatorUsers, setOperatorUsers] = useState<User[]>([]);
   
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation() as any;
 
   const canFilterByWarning = user?.role === 'window' || user?.role === 'admin';
+  const canFilterByOperator = user?.role === 'window' || user?.role === 'admin';
 
   useEffect(() => {
     if (location.state?.warningFilter) {
@@ -37,7 +40,21 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
 
   useEffect(() => {
     loadApplications();
-  }, [page, pageSize, keyword, statusFilter, warningFilter]);
+  }, [page, pageSize, keyword, statusFilter, warningFilter, operatorFilter]);
+
+  useEffect(() => {
+    if (!canFilterByOperator) {
+      setOperatorUsers([]);
+      setOperatorFilter('');
+      return;
+    }
+
+    listApplicationOperators().then(res => {
+      if (res.success) {
+        setOperatorUsers(res.data || []);
+      }
+    }).catch(() => {});
+  }, [canFilterByOperator]);
 
   const loadApplications = async () => {
     setLoading(true);
@@ -46,6 +63,7 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
       if (keyword) params.keyword = keyword;
       if (statusFilter) params.status = statusFilter;
       if (warningFilter && canFilterByWarning) params.warningStatus = warningFilter;
+      if (operatorFilter && canFilterByOperator) params.operatorUserId = operatorFilter;
 
       const res = await listApplications(params);
       if (res.success) {
@@ -66,6 +84,7 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
     setKeyword('');
     setStatusFilter('');
     setWarningFilter('');
+    setOperatorFilter('');
     setPage(1);
   };
 
@@ -304,6 +323,14 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
     { value: 'overdue', label: '已超期' },
   ];
 
+  const operatorOptions = [
+    { value: '', label: '全部经办/审核人' },
+    ...operatorUsers.map(u => ({
+      value: u.id,
+      label: `${u.name}（${roleLabels[u.role]}）`,
+    })),
+  ];
+
   return (
     <Card
       title={reviewMode ? '待审核申请' : showAll ? '申请管理' : '我的申请'}
@@ -329,6 +356,16 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
               onChange={setWarningFilter}
               options={warningOptions}
               style={{ width: 140 }}
+            />
+          )}
+          {canFilterByOperator && (
+            <Select
+              showSearch
+              value={operatorFilter}
+              onChange={setOperatorFilter}
+              options={operatorOptions}
+              optionFilterProp="label"
+              style={{ width: 180 }}
             />
           )}
           <Button icon={<ReloadOutlined />} onClick={handleReset}>

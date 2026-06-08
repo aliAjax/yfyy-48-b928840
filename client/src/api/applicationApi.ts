@@ -1,11 +1,12 @@
 import request from '../utils/request';
-import { Application, ApiResponse, ApplicationStatus, WarningStatus, BatchOperationResult, ReviewOpinion, ReviewOpinionFormData } from '../types';
+import { Application, ApiResponse, ApplicationStatus, WarningStatus, BatchOperationResult, ReviewOpinion, ReviewOpinionFormData, User } from '../types';
 
 export function listApplications(params?: {
   status?: ApplicationStatus;
   keyword?: string;
   matterId?: string;
   warningStatus?: WarningStatus;
+  operatorUserId?: string;
   page?: number;
   pageSize?: number;
 }): Promise<ApiResponse<Application[]>> {
@@ -78,19 +79,26 @@ export function getApplicationLogs(id: string): Promise<ApiResponse<any[]>> {
 export function getWarningList(params?: {
   warningStatus?: WarningStatus;
   keyword?: string;
+  operatorUserId?: string;
   page?: number;
   pageSize?: number;
 }): Promise<ApiResponse<Application[]>> {
   return request.get('/applications/warning/list', { params });
 }
 
-export function getWarningStats(): Promise<ApiResponse<{
+export function getWarningStats(params?: {
+  operatorUserId?: string;
+}): Promise<ApiResponse<{
   total: number;
   normal: number;
   warning: number;
   overdue: number;
 }>> {
-  return request.get('/applications/warning/stats');
+  return request.get('/applications/warning/stats', { params });
+}
+
+export function listApplicationOperators(): Promise<ApiResponse<User[]>> {
+  return request.get('/applications/operators');
 }
 
 export function batchAcceptApplications(ids: string[]): Promise<ApiResponse<BatchOperationResult>> {

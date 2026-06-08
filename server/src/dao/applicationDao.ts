@@ -61,6 +61,7 @@ export function listApplications(params?: {
   matterId?: string;
   status?: ApplicationStatus;
   keyword?: string;
+  operatorUserId?: string;
   page?: number;
   pageSize?: number;
 }): { applications: Application[]; total: number } {
@@ -82,6 +83,10 @@ export function listApplications(params?: {
   if (params?.keyword) {
     whereClauses.push('application_no LIKE ?');
     paramsArr.push(`%${params.keyword}%`);
+  }
+  if (params?.operatorUserId) {
+    whereClauses.push('(window_user_id = ? OR reviewer_user_id = ?)');
+    paramsArr.push(params.operatorUserId, params.operatorUserId);
   }
 
   const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
