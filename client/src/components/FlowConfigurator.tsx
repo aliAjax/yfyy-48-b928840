@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Card, Button, Input, Select, Space, List, Modal, Form, message, Tag } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, UpOutlined, DownOutlined, SettingOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Input, List, Modal, Form, message, Select, Space, Steps, Tag } from 'antd';
+import { EyeOutlined, PlusOutlined, EditOutlined, DeleteOutlined, UpOutlined, DownOutlined, SettingOutlined } from '@ant-design/icons';
 import { FlowStep, UserRole, ApplicationStatus } from '../types';
-import { roleLabels, statusLabels } from '../utils/common';
+import { roleLabels, statusLabels, validateFlowConfig } from '../utils/common';
 
 const { TextArea } = Input;
 
@@ -29,6 +29,7 @@ const roleOptions: { value: UserRole; label: string }[] = [
 export default function FlowConfigurator({ value, onChange, disabled = false }: FlowConfiguratorProps) {
   const [steps, setSteps] = useState<FlowStep[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
   const [editingStep, setEditingStep] = useState<FlowStep | null>(null);
   const [editingIndex, setEditingIndex] = useState<number>(-1);
   const [form] = Form.useForm();
@@ -156,6 +157,8 @@ export default function FlowConfigurator({ value, onChange, disabled = false }: 
     }
   };
 
+  const validation = validateFlowConfig(JSON.stringify(steps));
+
   return (
     <Card
       title={
@@ -166,13 +169,39 @@ export default function FlowConfigurator({ value, onChange, disabled = false }: 
       }
       extra={
         !disabled && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-            添加步骤
-          </Button>
+          <Space>
+            <Button icon={<EyeOutlined />} onClick={() => setPreviewVisible(true)}>
+              流程预览
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+              添加步骤
+            </Button>
+          </Space>
         )
       }
       size="small"
     >
+      <Space direction="vertical" style={{ width: '100%', marginBottom: 12 }} size={8}>
+        {validation.errors.length > 0 ? (
+          <Alert
+            type="error"
+            showIcon
+            message="流程配置存在问题"
+            description={validation.errors.join('；')}
+          />
+        ) : (
+          <Alert type="success" showIcon message="流程配置校验通过" />
+        )}
+        {validation.warnings.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message="流程配置建议"
+            description={validation.warnings.join('；')}
+          />
+        )}
+      </Space>
+
       <List
         dataSource={steps}
         renderItem={(item, index) => (
@@ -315,6 +344,32 @@ export default function FlowConfigurator({ value, onChange, disabled = false }: 
             <TextArea rows={3} placeholder="请输入步骤描述（选填）" maxLength={200} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="流程预览"
+        open={previewVisible}
+        onCancel={() => setPreviewVisible(false)}
+        footer={null}
+        width={720}
+      >
+        <Steps
+          direction="vertical"
+          current={validation.steps.length - 1}
+          items={validation.steps.map((step) => ({
+            title: (
+              <Space wrap>
+                <span>{step.name}</span>
+                {step.status && <Tag color={getStatusColor(step.status)}>{statusLabels[step.status]}</Tag>}
+                <Tag color={getRoleColor(step.role)}>{roleLabels[step.role]}</Tag>
+              </Space>
+            ),
+            description: step.description || '暂无描述',
+          }))}
+        />
+        {validation.steps.length === 0 && (
+          <div style={{ color: '#999', textAlign: 'center', padding: 24 }}>暂无可预览流程</div>
+        )}
       </Modal>
     </Card>
   );

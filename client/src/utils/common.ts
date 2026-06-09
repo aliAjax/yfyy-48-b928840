@@ -100,6 +100,16 @@ export const DEFAULT_FLOW_STEPS: FlowStep[] = [
 ];
 
 const LEGACY_STATUS_ORDER: ApplicationStatus[] = ['submitted', 'accepted', 'reviewing', 'approved'];
+const CONFIG_STATUS_ORDER: ApplicationStatus[] = ['submitted', 'accepted', 'reviewing', 'approved', 'completed'];
+const OPERABLE_STATUSES = new Set<ApplicationStatus>(CONFIG_STATUS_ORDER);
+const OPERABLE_ROLES = new Set<UserRole>(['window', 'reviewer', 'admin']);
+
+export interface FlowValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  steps: FlowStep[];
+}
 
 export function parseFlowConfig(flowConfigStr: string | null | undefined): FlowStep[] {
   if (!flowConfigStr) return [...DEFAULT_FLOW_STEPS];
@@ -119,6 +129,88 @@ export function parseFlowConfig(flowConfigStr: string | null | undefined): FlowS
   } catch {
     return [...DEFAULT_FLOW_STEPS];
   }
+}
+
+export function validateFlowConfig(flowConfigStr: string | null | undefined): FlowValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!flowConfigStr) {
+    errors.push('请配置审批流程');
+    return { valid: false, errors, warnings, steps: [] };
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(flowConfigStr);
+  } catch {
+    errors.push('办理流程JSON格式错误');
+    return { valid: false, errors, warnings, steps: [] };
+  }
+
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    errors.push('审批流程至少需要一个步骤');
+    return { valid: false, errors, warnings, steps: [] };
+  }
+
+  const steps = parsed
+    .map((s: any, idx: number) => ({
+      step: Number(s.step || idx + 1),
+      name: String(s.name || '').trim(),
+      role: s.role as UserRole,
+      description: s.description || '',
+      status: s.status as ApplicationStatus | undefined,
+    }))
+    .sort((a, b) => a.step - b.step);
+
+  const seenStatuses = new Map<ApplicationStatus, number>();
+  let lastStatusIndex = -1;
+
+  steps.forEach((step, index) => {
+    const label = step.name || `第${index + 1}步`;
+    if (!step.name) {
+      errors.push(`${label}缺少步骤名称`);
+    }
+    if (!step.status) {
+      errors.push(`${label}缺少对应状态`);
+      return;
+    }
+    if (!OPERABLE_STATUSES.has(step.status)) {
+      errors.push(`${label}使用了非标准流程状态：${statusLabels[step.status] || step.status}`);
+    }
+    if (seenStatuses.has(step.status)) {
+      errors.push(`状态「${statusLabels[step.status]}」重复配置在第${seenStatuses.get(step.status)}步和第${index + 1}步`);
+    } else {
+      seenStatuses.set(step.status, index + 1);
+    }
+    if (!step.role) {
+      errors.push(`${label}缺少可操作角色`);
+    } else if (!OPERABLE_ROLES.has(step.role)) {
+      errors.push(`${label}配置了无效可操作角色：${step.role}`);
+    }
+    const statusIndex = CONFIG_STATUS_ORDER.indexOf(step.status);
+    if (statusIndex >= 0) {
+      if (statusIndex < lastStatusIndex) {
+        errors.push(`${label}的状态顺序不合理，应按窗口受理、材料审核、业务审核、办结、已办结排列`);
+      }
+      lastStatusIndex = Math.max(lastStatusIndex, statusIndex);
+    }
+  });
+
+  if (!seenStatuses.has('completed')) {
+    errors.push('审批流程缺少已办结环节');
+  }
+  if (!seenStatuses.has('approved')) {
+    errors.push('审批流程缺少办结出证环节');
+  }
+  if (!seenStatuses.has('submitted')) {
+    warnings.push('建议配置窗口受理环节，方便新申请进入流程');
+  }
+  if (!seenStatuses.has('reviewing')) {
+    warnings.push('建议配置业务审核环节，方便审核人员处理申请');
+  }
+
+  return { valid: errors.length === 0, errors, warnings, steps };
 }
 
 export function getStepByStatus(flowSteps: FlowStep[], status: ApplicationStatus): FlowStep | null {

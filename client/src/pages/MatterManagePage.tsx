@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Switch, Tag, Tabs } from 'antd';
+import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Tabs } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
-import { listMatters, createMatter, updateMatter, deleteMatter, getMatter } from '../api/matterApi';
+import { listMatters, createMatter, updateMatter, deleteMatter } from '../api/matterApi';
 import { Matter } from '../types';
-import { safeJSONParse } from '../utils/common';
+import { validateFlowConfig } from '../utils/common';
 import FlowConfigurator from '../components/FlowConfigurator';
 
 const { TextArea } = Input;
@@ -97,10 +97,16 @@ export default function MatterManagePage() {
         return;
       }
 
+      const flowValidation = validateFlowConfig(flowText);
+      if (!flowValidation.valid) {
+        message.error(flowValidation.errors[0] || '流程配置校验不通过');
+        return;
+      }
+
       const data = {
         ...values,
         requiredMaterials: JSON.stringify(materialsParsed),
-        flowConfig: flowText,
+        flowConfig: JSON.stringify(flowValidation.steps),
       };
 
       if (editingId) {

@@ -71,6 +71,7 @@ export interface Application {
   rejectReason?: string;
   reviewOpinion?: string;
   currentStep?: string;
+  flowSnapshot?: string;
   windowUserId?: string;
   reviewerUserId?: string;
   submitTime?: string;

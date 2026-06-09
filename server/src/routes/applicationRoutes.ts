@@ -24,7 +24,7 @@ function enrichApplication(app: any) {
     app.status
   );
   
-  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const flowSteps = parseFlowConfig(app.flowSnapshot || matter?.flowConfig);
   const currentStepName = app.currentStep || getCurrentStepName(flowSteps, app.status);
   
   return {
@@ -43,7 +43,7 @@ function enrichApplication(app: any) {
 
 function getApplicationFlow(app: any) {
   const matter = findMatterById(app.matterId);
-  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const flowSteps = parseFlowConfig(app.flowSnapshot || matter?.flowConfig);
   return { matter, flowSteps };
 }
 
@@ -420,6 +420,7 @@ router.post('/', authMiddleware, requireRole('applicant'), (req: AuthRequest, re
 
   const flowSteps = parseFlowConfig(matter.flowConfig);
   const initialStepName = getCurrentStepName(flowSteps, 'draft');
+  const flowSnapshot = JSON.stringify(flowSteps);
 
   const app = createApplication({
     matterId,
@@ -428,6 +429,7 @@ router.post('/', authMiddleware, requireRole('applicant'), (req: AuthRequest, re
     materials: materials ? toJSON(materials) : undefined,
     status: 'draft',
     currentStep: initialStepName,
+    flowSnapshot,
   });
 
   createLog({
@@ -461,7 +463,7 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
 
   const oldStatus = app.status;
   const matter = findMatterById(app.matterId);
-  const flowSteps = parseFlowConfig(matter?.flowConfig);
+  const flowSteps = parseFlowConfig(app.flowSnapshot || matter?.flowConfig);
   const currentStepName = getCurrentStepName(flowSteps, 'submitted');
   
   app = updateApplication(app.id, {

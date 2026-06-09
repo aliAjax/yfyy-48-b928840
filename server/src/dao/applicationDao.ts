@@ -14,6 +14,7 @@ interface RawApplication {
   reject_reason?: string;
   review_opinion?: string;
   current_step?: string;
+  flow_snapshot?: string;
   window_user_id?: string;
   reviewer_user_id?: string;
   submit_time?: string;
@@ -36,6 +37,7 @@ function mapApplication(raw: RawApplication): Application {
     rejectReason: raw.reject_reason,
     reviewOpinion: raw.review_opinion,
     currentStep: raw.current_step,
+    flowSnapshot: raw.flow_snapshot,
     windowUserId: raw.window_user_id,
     reviewerUserId: raw.reviewer_user_id,
     submitTime: raw.submit_time,
@@ -106,14 +108,15 @@ export function createApplication(data: {
   materials?: string;
   status?: ApplicationStatus;
   currentStep?: string;
+  flowSnapshot?: string;
 }): Application {
   const id = generateId();
   const createdAt = now();
   const applicationNo = generateApplicationNo();
 
   db.prepare(`
-    INSERT INTO applications (id, application_no, matter_id, applicant_id, basic_info, materials, status, current_step, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO applications (id, application_no, matter_id, applicant_id, basic_info, materials, status, current_step, flow_snapshot, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     applicationNo,
@@ -123,6 +126,7 @@ export function createApplication(data: {
     data.materials || '[]',
     data.status || 'draft',
     data.currentStep || null,
+    data.flowSnapshot || null,
     createdAt,
     createdAt,
   );
@@ -138,6 +142,7 @@ export function updateApplication(id: string, data: Partial<{
   rejectReason: string;
   reviewOpinion: string;
   currentStep: string;
+  flowSnapshot: string;
   windowUserId: string;
   reviewerUserId: string;
   submitTime: string;
@@ -158,6 +163,7 @@ export function updateApplication(id: string, data: Partial<{
     rejectReason: 'reject_reason',
     reviewOpinion: 'review_opinion',
     currentStep: 'current_step',
+    flowSnapshot: 'flow_snapshot',
     windowUserId: 'window_user_id',
     reviewerUserId: 'reviewer_user_id',
     submitTime: 'submit_time',
@@ -183,4 +189,13 @@ export function updateApplication(id: string, data: Partial<{
 export function deleteApplication(id: string): boolean {
   const result = db.prepare('DELETE FROM applications WHERE id = ?').run(id);
   return result.changes > 0;
+}
+
+export function fillMissingFlowSnapshotsByMatterId(matterId: string, flowSnapshot: string): number {
+  const result = db.prepare(`
+    UPDATE applications
+    SET flow_snapshot = ?, updated_at = ?
+    WHERE matter_id = ? AND (flow_snapshot IS NULL OR flow_snapshot = '')
+  `).run(flowSnapshot, now(), matterId);
+  return result.changes;
 }

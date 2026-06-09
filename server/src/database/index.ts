@@ -14,6 +14,13 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 function migrateDatabase() {
+  const applicationColumns = db.prepare("PRAGMA table_info(applications)").all() as { name: string }[];
+  const applicationColNames = applicationColumns.map(c => c.name);
+
+  if (!applicationColNames.includes('flow_snapshot')) {
+    db.exec("ALTER TABLE applications ADD COLUMN flow_snapshot TEXT");
+  }
+
   const fileColumns = db.prepare("PRAGMA table_info(material_files)").all() as { name: string }[];
   const fileColNames = fileColumns.map(c => c.name);
   
@@ -78,6 +85,7 @@ function initDatabase() {
       reject_reason TEXT,
       review_opinion TEXT,
       current_step TEXT,
+      flow_snapshot TEXT,
       window_user_id TEXT,
       reviewer_user_id TEXT,
       submit_time TEXT,

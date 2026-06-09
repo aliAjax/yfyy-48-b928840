@@ -11,7 +11,7 @@ import { findUserById } from '../dao/userDao';
 import { createApplication } from '../dao/applicationDao';
 import { createLog } from '../dao/logDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
-import { toJSON } from '../utils/helpers';
+import { getCurrentStepName, parseFlowConfig, toJSON } from '../utils/helpers';
 
 const router = Router();
 
@@ -156,12 +156,17 @@ router.post('/:id/apply', authMiddleware, requireRole('applicant'), (req: AuthRe
     return;
   }
 
+  const flowSteps = parseFlowConfig(matter.flowConfig);
+  const initialStepName = getCurrentStepName(flowSteps, 'draft');
+
   const app = createApplication({
     matterId: template.matterId,
     applicantId: req.user.id,
     basicInfo: template.basicInfo,
     materials: template.materials,
     status: 'draft',
+    currentStep: initialStepName,
+    flowSnapshot: JSON.stringify(flowSteps),
   });
 
   createLog({
