@@ -1,12 +1,16 @@
-import { useEffect, useState, useMemo } from 'react';
-import { Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider, Steps, Tooltip, Modal, Table, Collapse, Empty } from 'antd';
+import { useEffect, useState } from 'react';
+import { Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider, Steps, Tooltip, Modal, Collapse, Empty } from 'antd';
 import { ArrowLeftOutlined, FileTextOutlined, UserOutlined, HistoryOutlined, DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SaveOutlined, CheckOutlined, CloseOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getApplication, reviewApplication, getReviewOpinions, saveReviewOpinions } from '../api/applicationApi';
-import { Application, FlowStep, MaterialFile, ReviewOpinionFormData, ReviewOpinion, MatterMaterial } from '../types';
-import { statusLabels, statusColors, formatFileSize, safeJSONParse, parseFlowConfig, roleLabels } from '../utils/common';
-import { getDownloadUrl, listFileVersions } from '../api/fileApi';
+import { getApplication, reviewApplication } from '../api/applicationApi';
+import { Application, MaterialFile, Matter } from '../types';
+import { statusLabels, statusColors, formatFileSize, safeJSONParse, roleLabels } from '../utils/common';
+import { getDownloadUrl } from '../api/fileApi';
 import { getMatter } from '../api/matterApi';
+import FileVersionModal from '../components/FileVersionModal';
+import { useFileVersionModal } from '../hooks/useFileVersionModal';
+import { useReviewFlowSteps } from '../hooks/useReviewFlowSteps';
+import { useReviewOpinionForm } from '../hooks/useReviewOpinionForm';
 import dayjs from 'dayjs';
 
 const { Panel } = Collapse;
@@ -17,30 +21,15 @@ export default function ApplicationReviewPage() {
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [application, setApplication] = useState<Application | null>(null);
-  const [matter, setMatter] = useState<any>(null);
+  const [matter, setMatter] = useState<Matter | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [versionModalVisible, setVersionModalVisible] = useState(false);
-  const [versionList, setVersionList] = useState<MaterialFile[]>([]);
-  const [currentVersionFile, setCurrentVersionFile] = useState<MaterialFile | null>(null);
-  const [versionLoading, setVersionLoading] = useState(false);
-  const [reviewOpinions, setReviewOpinions] = useState<ReviewOpinion[]>([]);
-  const [formData, setFormData] = useState<ReviewOpinionFormData[]>([]);
-  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
     if (id) {
       loadApplication();
-      loadReviewOpinions();
     }
   }, [id]);
-
-  useEffect(() => {
-    if (matter && reviewOpinions.length > 0 && !initialized) {
-      restoreFromLatestRound();
-    }
-  }, [matter, reviewOpinions, initialized]);
 
   const loadApplication = async () => {
     setLoading(true);
@@ -51,7 +40,7 @@ export default function ApplicationReviewPage() {
         if (res.data?.matterId) {
           const matterRes = await getMatter(res.data.matterId);
           if (matterRes.success) {
-            setMatter(matterRes.data);
+            setMatter(matterRes.data || null);
           }
         }
       }
@@ -60,101 +49,27 @@ export default function ApplicationReviewPage() {
     }
   };
 
-  const loadReviewOpinions = async () => {
-    try {
-      const res = await getReviewOpinions(id!);
-      if (res.success) {
-        setReviewOpinions(res.data || []);
-      }
-    } catch {}
-  };
-
-  const restoreFromLatestRound = () => {
-    if (reviewOpinions.length === 0) return;
-    const maxRound = Math.max(...reviewOpinions.map(o => o.reviewRound));
-    const latestOpinions = reviewOpinions.filter(o => o.reviewRound === maxRound);
-    
-    const materials = safeJSONParse<MatterMaterial[]>(matter?.requiredMaterials, []);
-    const data: ReviewOpinionFormData[] = materials.map(m => {
-      const existing = latestOpinions.find(o => o.materialName === m.name);
-      return {
-        materialName: m.name,
-        status: existing?.status || 'pass',
-        opinion: existing?.opinion || '',
-      };
-    });
-    setFormData(data);
-    setInitialized(true);
-  };
-
-  useEffect(() => {
-    if (matter && formData.length === 0 && !initialized) {
-      const materials = safeJSONParse<MatterMaterial[]>(matter.requiredMaterials, []);
-      const data: ReviewOpinionFormData[] = materials.map(m => ({
-        materialName: m.name,
-        status: 'pass',
-        opinion: '',
-      }));
-      setFormData(data);
-    }
-  }, [matter, formData.length, initialized]);
-
-  const handleStatusChange = (materialName: string, status: 'pass' | 'problem') => {
-    setFormData(prev => prev.map(item => 
-      item.materialName === materialName ? { ...item, status } : item
-    ));
-  };
-
-  const handleOpinionChange = (materialName: string, opinion: string) => {
-    setFormData(prev => prev.map(item => 
-      item.materialName === materialName ? { ...item, opinion } : item
-    ));
-  };
-
-  const handleMarkAllPass = () => {
-    setFormData(prev => prev.map(item => ({ ...item, status: 'pass' as const })));
-    message.success('已全部标记为通过');
-  };
-
-  const handleMarkAllProblem = () => {
-    setFormData(prev => prev.map(item => ({ ...item, status: 'problem' as const })));
-    message.success('已全部标记为存在问题');
-  };
-
-  const handleSaveDraft = async () => {
-    if (formData.length === 0) {
-      message.warning('暂无材料可保存');
-      return;
-    }
-
-    const problemItems = formData.filter(item => item.status === 'problem' && !item.opinion.trim());
-    if (problemItems.length > 0) {
-      Modal.confirm({
-        title: '存在问题的材料未填写意见',
-        content: `以下材料标记为"存在问题"但未填写具体意见：\n${problemItems.map(i => `• ${i.materialName}`).join('\n')}\n\n是否继续保存？`,
-        okText: '继续保存',
-        cancelText: '返回补充',
-        onOk: doSaveDraft,
-      });
-      return;
-    }
-
-    doSaveDraft();
-  };
-
-  const doSaveDraft = async () => {
-    setSaving(true);
-    try {
-      const res = await saveReviewOpinions(id!, formData);
-      if (res.success) {
-        message.success('审查意见已保存');
-        loadReviewOpinions();
-        setInitialized(true);
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
+  const versionModal = useFileVersionModal(id);
+  const { flowSteps, currentStepIndex } = useReviewFlowSteps(application);
+  const {
+    saving,
+    formData,
+    passCount,
+    problemCount,
+    groupedOpinions,
+    reviewRounds,
+    matterMaterials,
+    getFilesForMaterial,
+    handleStatusChange,
+    handleOpinionChange,
+    handleMarkAllPass,
+    handleMarkAllProblem,
+    handleSaveDraft,
+  } = useReviewOpinionForm({
+    applicationId: id,
+    matter,
+    files: application?.files || [],
+  });
 
   const handleSubmit = async () => {
     try {
@@ -202,103 +117,7 @@ export default function ApplicationReviewPage() {
     }
   };
 
-  const handleViewVersions = async (file: MaterialFile) => {
-    setCurrentVersionFile(file);
-    setVersionModalVisible(true);
-    await loadVersionHistory(file.originalName);
-  };
-
-  const loadVersionHistory = async (originalName: string) => {
-    setVersionLoading(true);
-    try {
-      const res = await listFileVersions(id!, originalName);
-      if (res.success) {
-        setVersionList(res.data || []);
-      }
-    } catch {
-    } finally {
-      setVersionLoading(false);
-    }
-  };
-
   const basicInfo = application ? safeJSONParse<Record<string, any>>(application.basicInfo, {}) : {};
-
-  const flowSteps: FlowStep[] = useMemo(() => {
-    if (application?.flowSteps && application.flowSteps.length > 0) {
-      return application.flowSteps;
-    }
-    return parseFlowConfig(null);
-  }, [application]);
-
-  const currentStepIndex = useMemo(() => {
-    if (!application) return -1;
-    const status = application.status;
-    
-    const hasStatusField = flowSteps.some(s => s.status);
-    if (hasStatusField) {
-      let maxCompletedStep = -1;
-      flowSteps.forEach((step, idx) => {
-        if (step.status === 'accepted' && (status === 'accepted' || status === 'reviewing' || status === 'approved' || status === 'completed')) {
-          maxCompletedStep = Math.max(maxCompletedStep, idx);
-        }
-        if (step.status === 'reviewing' && (status === 'reviewing' || status === 'approved' || status === 'completed')) {
-          maxCompletedStep = Math.max(maxCompletedStep, idx);
-        }
-        if (step.status === 'approved' && (status === 'approved' || status === 'completed')) {
-          maxCompletedStep = Math.max(maxCompletedStep, idx);
-        }
-        if (step.status === 'completed' && status === 'completed') {
-          maxCompletedStep = Math.max(maxCompletedStep, idx);
-        }
-      });
-      return maxCompletedStep;
-    } else {
-      if (status === 'draft' || status === 'submitted') return -1;
-      if (status === 'rejected') return flowSteps.length - 1;
-      if (status === 'completed') return flowSteps.length - 1;
-      if (status === 'supplement') return 0;
-      if (status === 'accepted') return Math.min(1, flowSteps.length - 1);
-      if (status === 'reviewing') return Math.min(2, flowSteps.length - 1);
-      if (status === 'approved') return Math.min(flowSteps.length - 2, flowSteps.length - 1);
-      return -1;
-    }
-  }, [application, flowSteps]);
-
-  const latestRoundOpinions = useMemo(() => {
-    if (reviewOpinions.length === 0) return [];
-    const maxRound = Math.max(...reviewOpinions.map(o => o.reviewRound));
-    return reviewOpinions.filter(o => o.reviewRound === maxRound);
-  }, [reviewOpinions]);
-
-  const passCount = formData.filter(item => item.status === 'pass').length;
-  const problemCount = formData.filter(item => item.status === 'problem').length;
-
-  const groupedOpinions = useMemo(() => {
-    const groups: Record<number, ReviewOpinion[]> = {};
-    reviewOpinions.forEach(opinion => {
-      if (!groups[opinion.reviewRound]) {
-        groups[opinion.reviewRound] = [];
-      }
-      groups[opinion.reviewRound].push(opinion);
-    });
-    return groups;
-  }, [reviewOpinions]);
-
-  const reviewRounds = useMemo(() => {
-    return Object.keys(groupedOpinions).map(Number).sort((a, b) => b - a);
-  }, [groupedOpinions]);
-
-  const getFilesForMaterial = (materialName: string): MaterialFile[] => {
-    if (!application?.files) return [];
-    return application.files.filter(f => 
-      f.originalName.includes(materialName) || materialName.includes(f.originalName.replace(/\.[^/.]+$/, ''))
-    );
-  };
-
-  const matterMaterials = useMemo(() => {
-    if (!matter) return [];
-    return safeJSONParse<MatterMaterial[]>(matter.requiredMaterials, []);
-  }, [matter]);
 
   if (!application && !loading) {
     return <div style={{ textAlign: 'center', padding: 40 }}>申请不存在</div>;
@@ -408,7 +227,7 @@ export default function ApplicationReviewPage() {
                   type="link"
                   size="small"
                   icon={<HistoryOutlined />}
-                  onClick={() => handleViewVersions(item)}
+                  onClick={() => versionModal.handleViewVersions(item)}
                 >
                   版本历史
                 </Button>,
@@ -461,93 +280,13 @@ export default function ApplicationReviewPage() {
         )}
       </Card>
 
-      <Modal
-        title={
-          <Space>
-            <span>{currentVersionFile?.originalName} - 版本历史</span>
-            <Tag color="blue">共 {versionList.length} 个版本</Tag>
-          </Space>
-        }
-        open={versionModalVisible}
-        onCancel={() => setVersionModalVisible(false)}
-        footer={null}
-        width={800}
-      >
-        <Table
-          dataSource={versionList}
-          rowKey="id"
-          loading={versionLoading}
-          pagination={false}
-          size="middle"
-          columns={[
-            {
-              title: '版本',
-              dataIndex: 'version',
-              key: 'version',
-              width: 90,
-              render: (version: number, record: MaterialFile) => (
-                <div style={{ textAlign: 'center' }}>
-                  <Tag color={record.isCurrent ? 'green' : 'default'} style={{ fontWeight: 'bold', fontSize: 14 }}>
-                    v{version}
-                  </Tag>
-                  {record.isCurrent && (
-                    <div style={{ color: '#52c41a', fontSize: 12, marginTop: 2, fontWeight: 'bold' }}>
-                      ✓ 当前版本
-                    </div>
-                  )}
-                </div>
-              ),
-            },
-            {
-              title: '文件大小',
-              dataIndex: 'fileSize',
-              key: 'fileSize',
-              width: 90,
-              render: (size: number) => formatFileSize(size),
-            },
-            {
-              title: '上传人',
-              dataIndex: 'uploadedByName',
-              key: 'uploadedByName',
-              width: 100,
-              render: (name?: string) => name || '-',
-            },
-            {
-              title: '上传时间',
-              dataIndex: 'createdAt',
-              key: 'createdAt',
-              width: 160,
-              render: (time: string) => dayjs(time).format('YYYY-MM-DD HH:mm:ss'),
-            },
-            {
-              title: '版本说明',
-              dataIndex: 'versionNote',
-              key: 'versionNote',
-              ellipsis: true,
-              render: (note?: string) => note || <span style={{ color: '#bfbfbf' }}>无</span>,
-            },
-            {
-              title: '操作',
-              key: 'action',
-              width: 120,
-              fixed: 'right',
-              render: (_, record: MaterialFile) => (
-                <Button
-                  type={record.isCurrent ? 'primary' : 'link'}
-                  size="small"
-                  icon={<DownloadOutlined />}
-                  onClick={() => window.open(getDownloadUrl(record.id))}
-                >
-                  {record.isCurrent ? '下载当前' : '下载'}
-                </Button>
-              ),
-            },
-          ]}
-        />
-        {versionList.length === 0 && !versionLoading && (
-          <Empty description="暂无版本记录" />
-        )}
-      </Modal>
+      <FileVersionModal
+        open={versionModal.visible}
+        currentVersionFile={versionModal.currentVersionFile}
+        versionList={versionModal.versionList}
+        loading={versionModal.loading}
+        onCancel={versionModal.handleClose}
+      />
 
       <Divider />
 
