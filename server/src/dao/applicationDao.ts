@@ -19,6 +19,7 @@ interface RawApplication {
   submit_time?: string;
   accept_time?: string;
   complete_time?: string;
+  flow_snapshot?: string;
   created_at: string;
   updated_at: string;
 }
@@ -41,6 +42,7 @@ function mapApplication(raw: RawApplication): Application {
     submitTime: raw.submit_time,
     acceptTime: raw.accept_time,
     completeTime: raw.complete_time,
+    flowSnapshot: raw.flow_snapshot,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
   };
@@ -61,6 +63,10 @@ export function listApplications(params?: {
   matterId?: string;
   status?: ApplicationStatus;
   keyword?: string;
+  operatorUserId?: string;
+  hasSupplement?: boolean;
+  supplementReason?: string;
+  applicationIds?: string[];
   page?: number;
   pageSize?: number;
 }): { applications: Application[]; total: number } {
@@ -82,6 +88,46 @@ export function listApplications(params?: {
   if (params?.keyword) {
     whereClauses.push('application_no LIKE ?');
     paramsArr.push(`%${params.keyword}%`);
+  }
+  if (params?.operatorUserId) {
+    whereClauses.push('(window_user_id = ? OR reviewer_user_id = ?)');
+    paramsArr.push(params.operatorUserId, params.operatorUserId);
+  }
+  if (params?.applicationIds && params.applicationIds.length > 0) {
+    const placeholders = params.applicationIds.map(() => '?').join(',');
+    whereClauses.push(`id IN (${placeholders})`);
+    paramsArr.push(...params.applicationIds);
+  }
+  if (params?.hasSupplement) {
+    whereClauses.push(`(
+      status = 'supplement' 
+      OR (supplement_reason IS NOT NULL AND supplement_reason != '')
+      OR EXISTS (SELECT 1 FROM operation_logs l WHERE l.application_id = applications.id AND l.action = 'supplement')
+      OR EXISTS (SELECT 1 FROM review_opinions ro WHERE ro.application_id = applications.id AND ro.status = 'problem')
+    )`);
+  }
+  if (params?.supplementReason) {
+    whereClauses.push(`(
+      (supplement_reason IS NOT NULL AND supplement_reason LIKE ?)
+      OR EXISTS (
+        SELECT 1 FROM operation_logs l 
+        WHERE l.application_id = applications.id 
+        AND l.action = 'supplement' 
+        AND l.description LIKE ?
+      )
+      OR EXISTS (
+        SELECT 1 FROM review_opinions ro 
+        WHERE ro.application_id = applications.id 
+        AND ro.status = 'problem' 
+        AND (ro.opinion LIKE ? OR ro.material_name LIKE ?)
+      )
+    )`);
+    paramsArr.push(
+      `%${params.supplementReason}%`,
+      `%${params.supplementReason}%`,
+      `%${params.supplementReason}%`,
+      `%${params.supplementReason}%`
+    );
   }
 
   const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -106,14 +152,15 @@ export function createApplication(data: {
   materials?: string;
   status?: ApplicationStatus;
   currentStep?: string;
+  flowSnapshot?: string;
 }): Application {
   const id = generateId();
   const createdAt = now();
   const applicationNo = generateApplicationNo();
 
   db.prepare(`
-    INSERT INTO applications (id, application_no, matter_id, applicant_id, basic_info, materials, status, current_step, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO applications (id, application_no, matter_id, applicant_id, basic_info, materials, status, current_step, flow_snapshot, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     applicationNo,
@@ -123,6 +170,7 @@ export function createApplication(data: {
     data.materials || '[]',
     data.status || 'draft',
     data.currentStep || null,
+    data.flowSnapshot || null,
     createdAt,
     createdAt,
   );
@@ -143,6 +191,7 @@ export function updateApplication(id: string, data: Partial<{
   submitTime: string;
   acceptTime: string;
   completeTime: string;
+  flowSnapshot: string;
 }>): Application | null {
   const app = findApplicationById(id);
   if (!app) return null;
@@ -163,6 +212,7 @@ export function updateApplication(id: string, data: Partial<{
     submitTime: 'submit_time',
     acceptTime: 'accept_time',
     completeTime: 'complete_time',
+    flowSnapshot: 'flow_snapshot',
   };
 
   for (const [key, value] of Object.entries(data)) {

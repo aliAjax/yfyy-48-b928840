@@ -10,6 +10,8 @@ interface RawMatter {
   description?: string;
   required_materials?: string;
   promise_days: number;
+  warning_days?: number;
+  exclude_supplement_time?: number;
   flow_config?: string;
   status: string;
   created_at: string;
@@ -25,6 +27,8 @@ function mapMatter(raw: RawMatter): Matter {
     description: raw.description || '',
     requiredMaterials: raw.required_materials || '[]',
     promiseDays: raw.promise_days,
+    warningDays: raw.warning_days ?? undefined,
+    excludeSupplementTime: raw.exclude_supplement_time === 1,
     flowConfig: raw.flow_config || '[]',
     status: raw.status as 'active' | 'inactive',
     createdAt: raw.created_at,
@@ -88,6 +92,8 @@ export function createMatter(data: {
   description?: string;
   requiredMaterials?: string;
   promiseDays: number;
+  warningDays?: number;
+  excludeSupplementTime?: boolean;
   flowConfig?: string;
   status?: string;
 }): Matter {
@@ -95,8 +101,8 @@ export function createMatter(data: {
   const createdAt = now();
 
   db.prepare(`
-    INSERT INTO matters (id, code, name, department, description, required_materials, promise_days, flow_config, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO matters (id, code, name, department, description, required_materials, promise_days, warning_days, exclude_supplement_time, flow_config, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     data.code,
@@ -105,6 +111,8 @@ export function createMatter(data: {
     data.description || null,
     data.requiredMaterials || '[]',
     data.promiseDays,
+    data.warningDays ?? null,
+    data.excludeSupplementTime ? 1 : 0,
     data.flowConfig || '[]',
     data.status || 'active',
     createdAt,
@@ -121,6 +129,8 @@ export function updateMatter(id: string, data: Partial<{
   description: string;
   requiredMaterials: string;
   promiseDays: number;
+  warningDays: number;
+  excludeSupplementTime: boolean;
   flowConfig: string;
   status: string;
 }>): Matter | null {
@@ -136,6 +146,14 @@ export function updateMatter(id: string, data: Partial<{
   if (data.description !== undefined) { updates.push('description = ?'); values.push(data.description); }
   if (data.requiredMaterials !== undefined) { updates.push('required_materials = ?'); values.push(data.requiredMaterials); }
   if (data.promiseDays !== undefined) { updates.push('promise_days = ?'); values.push(data.promiseDays); }
+  if (data.warningDays !== undefined) { 
+    updates.push('warning_days = ?'); 
+    values.push(data.warningDays === null ? null : data.warningDays); 
+  }
+  if (data.excludeSupplementTime !== undefined) { 
+    updates.push('exclude_supplement_time = ?'); 
+    values.push(data.excludeSupplementTime ? 1 : 0); 
+  }
   if (data.flowConfig !== undefined) { updates.push('flow_config = ?'); values.push(data.flowConfig); }
   if (data.status !== undefined) { updates.push('status = ?'); values.push(data.status); }
   

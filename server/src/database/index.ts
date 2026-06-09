@@ -36,6 +36,23 @@ function migrateDatabase() {
   if (!opinionColNames.includes('updated_at')) {
     db.exec("ALTER TABLE review_opinions ADD COLUMN updated_at TEXT");
   }
+
+  const appColumns = db.prepare("PRAGMA table_info(applications)").all() as { name: string }[];
+  const appColNames = appColumns.map(c => c.name);
+  
+  if (!appColNames.includes('flow_snapshot')) {
+    db.exec("ALTER TABLE applications ADD COLUMN flow_snapshot TEXT");
+  }
+
+  const matterColumns = db.prepare("PRAGMA table_info(matters)").all() as { name: string }[];
+  const matterColNames = matterColumns.map(c => c.name);
+  
+  if (!matterColNames.includes('warning_days')) {
+    db.exec("ALTER TABLE matters ADD COLUMN warning_days INTEGER");
+  }
+  if (!matterColNames.includes('exclude_supplement_time')) {
+    db.exec("ALTER TABLE matters ADD COLUMN exclude_supplement_time INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 function initDatabase() {
@@ -60,6 +77,8 @@ function initDatabase() {
       description TEXT,
       required_materials TEXT,
       promise_days INTEGER NOT NULL DEFAULT 5,
+      warning_days INTEGER,
+      exclude_supplement_time INTEGER NOT NULL DEFAULT 0,
       flow_config TEXT,
       status TEXT NOT NULL DEFAULT 'active',
       created_at TEXT NOT NULL,
@@ -83,6 +102,7 @@ function initDatabase() {
       submit_time TEXT,
       accept_time TEXT,
       complete_time TEXT,
+      flow_snapshot TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (matter_id) REFERENCES matters(id),

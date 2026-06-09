@@ -6,10 +6,19 @@ export function listApplications(params?: {
   keyword?: string;
   matterId?: string;
   warningStatus?: WarningStatus;
+  operatorUserId?: string;
+  materialCompleteness?: string;
+  hasSupplement?: boolean;
+  supplementReason?: string;
+  applicationIds?: string[];
   page?: number;
   pageSize?: number;
 }): Promise<ApiResponse<Application[]>> {
-  return request.get('/applications', { params });
+  const reqParams: any = { ...params };
+  if (params?.applicationIds && params.applicationIds.length > 0) {
+    reqParams.applicationIds = params.applicationIds.join(',');
+  }
+  return request.get('/applications', { params: reqParams });
 }
 
 export function getApplication(id: string): Promise<ApiResponse<Application>> {
@@ -78,19 +87,22 @@ export function getApplicationLogs(id: string): Promise<ApiResponse<any[]>> {
 export function getWarningList(params?: {
   warningStatus?: WarningStatus;
   keyword?: string;
+  operatorUserId?: string;
   page?: number;
   pageSize?: number;
 }): Promise<ApiResponse<Application[]>> {
   return request.get('/applications/warning/list', { params });
 }
 
-export function getWarningStats(): Promise<ApiResponse<{
+export function getWarningStats(params?: {
+  operatorUserId?: string;
+}): Promise<ApiResponse<{
   total: number;
   normal: number;
   warning: number;
   overdue: number;
 }>> {
-  return request.get('/applications/warning/stats');
+  return request.get('/applications/warning/stats', { params });
 }
 
 export function batchAcceptApplications(ids: string[]): Promise<ApiResponse<BatchOperationResult>> {

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Card, List, Tag, Button, Input, Space, Pagination, Modal, Descriptions, message, Popconfirm } from 'antd';
-import { SearchOutlined, FileTextOutlined, DeleteOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons';
-import { listTemplates, deleteTemplate, applyTemplate } from '../api/templateApi';
+import { Card, Table, Tag, Button, Input, Space, Modal, Descriptions, message, Popconfirm } from 'antd';
+import { SearchOutlined, EditOutlined, CopyOutlined, PlayCircleOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
+import { listTemplates, deleteTemplate, applyTemplate, updateTemplate, copyTemplate } from '../api/templateApi';
 import { ApplicationTemplate, ApplicationMaterial } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { safeJSONParse } from '../utils/common';
 import dayjs from 'dayjs';
+import type { ColumnsType } from 'antd/es/table';
 
 const { Search } = Input;
 
@@ -13,18 +14,24 @@ export default function TemplateListPage() {
   const [templates, setTemplates] = useState<ApplicationTemplate[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(10);
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<ApplicationTemplate | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [renameVisible, setRenameVisible] = useState(false);
+  const [renameTemplate, setRenameTemplate] = useState<ApplicationTemplate | null>(null);
+  const [renameInput, setRenameInput] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
   useEffect(() => {
     loadTemplates();
-  }, [page, keyword]);
+  }, [page, pageSize, keyword]);
 
   const loadTemplates = async () => {
     setLoading(true);
@@ -55,19 +62,20 @@ export default function TemplateListPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      setDeleting(true);
+      setDeletingId(id);
       const res = await deleteTemplate(id);
       if (res.success) {
         message.success('删除成功');
         loadTemplates();
       }
     } finally {
-      setDeleting(false);
+      setDeletingId(null);
     }
   };
 
   const handleApply = async (template: ApplicationTemplate) => {
     try {
+      setApplyingId(template.id);
       const res = await applyTemplate(template.id);
       if (res.success && res.data) {
         message.success('已从模板创建申请草稿');
@@ -75,6 +83,45 @@ export default function TemplateListPage() {
       }
     } catch (error) {
       // error handled by interceptor
+    } finally {
+      setApplyingId(null);
+    }
+  };
+
+  const handleRenameClick = (template: ApplicationTemplate) => {
+    setRenameTemplate(template);
+    setRenameInput(template.name);
+    setRenameVisible(true);
+  };
+
+  const handleRename = async () => {
+    if (!renameTemplate || !renameInput.trim()) {
+      message.warning('模板名称不能为空');
+      return;
+    }
+    try {
+      setRenaming(true);
+      const res = await updateTemplate(renameTemplate.id, { name: renameInput.trim() });
+      if (res.success) {
+        message.success('重命名成功');
+        setRenameVisible(false);
+        loadTemplates();
+      }
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const handleCopy = async (template: ApplicationTemplate) => {
+    try {
+      setCopyingId(template.id);
+      const res = await copyTemplate(template.id);
+      if (res.success) {
+        message.success('复制成功');
+        loadTemplates();
+      }
+    } finally {
+      setCopyingId(null);
     }
   };
 
@@ -85,6 +132,107 @@ export default function TemplateListPage() {
   const materials = selectedTemplate
     ? safeJSONParse<ApplicationMaterial[]>(selectedTemplate.materials, [])
     : [];
+
+  const columns: ColumnsType<ApplicationTemplate> = [
+    {
+      title: '模板名称',
+      dataIndex: 'name',
+      key: 'name',
+      ellipsis: true,
+      render: (name: string) => (
+        <Space>
+          <EditOutlined style={{ color: '#1890ff' }} />
+          <span>{name}</span>
+        </Space>
+      ),
+    },
+    {
+      title: '所属事项',
+      dataIndex: 'matterName',
+      key: 'matterName',
+      width: 200,
+      render: (matterName: string) => <Tag color="blue">{matterName}</Tag>,
+    },
+    {
+      title: '材料数量',
+      dataIndex: 'materials',
+      key: 'materialCount',
+      width: 100,
+      align: 'center',
+      render: (materialsStr: string) => {
+        const ms = safeJSONParse<ApplicationMaterial[]>(materialsStr, []);
+        return ms.length;
+      },
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      width: 180,
+      render: (createdAt: string) => dayjs(createdAt).format('YYYY-MM-DD HH:mm'),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 320,
+      fixed: 'right',
+      render: (_, record: ApplicationTemplate) => (
+        <Space size="small">
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => handleViewDetail(record)}
+          >
+            详情
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => handleRenameClick(record)}
+          >
+            重命名
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<CopyOutlined />}
+            loading={copyingId === record.id}
+            onClick={() => handleCopy(record)}
+          >
+            复制
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<PlayCircleOutlined />}
+            loading={applyingId === record.id}
+            onClick={() => handleApply(record)}
+          >
+            套用
+          </Button>
+          <Popconfirm
+            title="确定删除此模板？"
+            description="删除后无法恢复"
+            onConfirm={() => handleDelete(record.id)}
+            okText="确定"
+            cancelText="取消"
+          >
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={deletingId === record.id}
+            >
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
 
   return (
     <div>
@@ -103,73 +251,27 @@ export default function TemplateListPage() {
           </Space>
         }
       >
-        <List
+        <Table
+          rowKey="id"
           loading={loading}
-          grid={{ gutter: 16, xs: 1, sm: 2, md: 2, lg: 3, xl: 3 }}
+          columns={columns}
           dataSource={templates}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: ['10', '20', '50'],
+            showTotal: (total) => `共 ${total} 条记录`,
+            onChange: (page, pageSize) => {
+              setPage(page);
+              setPageSize(pageSize);
+            },
+          }}
           locale={{
             emptyText: '暂无模板，您可以在填写申请时保存为模板',
           }}
-          renderItem={(template) => {
-            const itemMaterials = safeJSONParse<ApplicationMaterial[]>(template.materials, []);
-            return (
-              <List.Item>
-                <Card
-                  hoverable
-                  actions={[
-                    <Button type="link" onClick={() => handleViewDetail(template)}>查看详情</Button>,
-                    <Button type="link" onClick={() => handleApply(template)}>
-                      <PlayCircleOutlined /> 套用
-                    </Button>,
-                    <Popconfirm
-                      title="确定删除此模板？"
-                      description="删除后无法恢复"
-                      onConfirm={() => handleDelete(template.id)}
-                      okText="确定"
-                      cancelText="取消"
-                    >
-                      <Button type="link" danger>
-                        <DeleteOutlined /> 删除
-                      </Button>
-                    </Popconfirm>,
-                  ]}
-                >
-                  <Card.Meta
-                    title={
-                      <Space>
-                        <PlusOutlined style={{ color: '#1890ff' }} />
-                        <span>{template.name}</span>
-                      </Space>
-                    }
-                    description={
-                      <div style={{ marginTop: 12 }}>
-                        <div style={{ marginBottom: 8 }}>
-                          <Tag color="blue">{template.matterName}</Tag>
-                        </div>
-                        <p style={{ color: '#666', fontSize: 13, marginBottom: 8 }}>
-                          共 {itemMaterials.length} 项材料
-                        </p>
-                        <div style={{ display: 'flex', alignItems: 'center', color: '#999', fontSize: 12 }}>
-                          <FileTextOutlined style={{ marginRight: 4 }} />
-                          创建时间：{dayjs(template.createdAt).format('YYYY-MM-DD HH:mm')}
-                        </div>
-                      </div>
-                    }
-                  />
-                </Card>
-              </List.Item>
-            );
-          }}
         />
-        <div style={{ marginTop: 24, textAlign: 'right' }}>
-          <Pagination
-            current={page}
-            total={total}
-            pageSize={pageSize}
-            onChange={setPage}
-            showSizeChanger={false}
-          />
-        </div>
       </Card>
 
       <Modal
@@ -225,6 +327,27 @@ export default function TemplateListPage() {
             </Descriptions.Item>
           </Descriptions>
         )}
+      </Modal>
+
+      <Modal
+        title="重命名模板"
+        open={renameVisible}
+        onCancel={() => setRenameVisible(false)}
+        onOk={handleRename}
+        confirmLoading={renaming}
+        okText="确定"
+        cancelText="取消"
+        width={400}
+      >
+        <Input
+          value={renameInput}
+          onChange={(e) => setRenameInput(e.target.value)}
+          placeholder="请输入新的模板名称"
+          onPressEnter={handleRename}
+          maxLength={50}
+          showCount
+          autoFocus
+        />
       </Modal>
     </div>
   );

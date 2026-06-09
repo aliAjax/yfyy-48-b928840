@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { findMatterById, listMatters, createMatter, updateMatter, deleteMatter } from '../dao/matterDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
+import { validateFlowConfig, parseFlowConfig } from '../utils/helpers';
 
 const router = Router();
 
@@ -31,11 +32,30 @@ router.get('/:id', authMiddleware, (req, res) => {
 });
 
 router.post('/', authMiddleware, requireRole('admin'), (req, res) => {
-  const { code, name, department, description, requiredMaterials, promiseDays, flowConfig, status } = req.body;
+  const { code, name, department, description, requiredMaterials, promiseDays, warningDays, excludeSupplementTime, flowConfig, status } = req.body;
 
   if (!code || !name || !department || !promiseDays) {
     res.json({ success: false, message: '请填写必填项' });
     return;
+  }
+
+  if (flowConfig) {
+    try {
+      const flowSteps = parseFlowConfig(flowConfig);
+      const validation = validateFlowConfig(flowSteps);
+      if (!validation.valid) {
+        res.json({
+          success: false,
+          message: '流程配置校验失败',
+          errors: validation.errors,
+          warnings: validation.warnings,
+        });
+        return;
+      }
+    } catch {
+      res.json({ success: false, message: '流程配置JSON格式错误' });
+      return;
+    }
   }
 
   const matter = createMatter({
@@ -45,6 +65,8 @@ router.post('/', authMiddleware, requireRole('admin'), (req, res) => {
     description,
     requiredMaterials,
     promiseDays: Number(promiseDays),
+    warningDays: warningDays !== undefined && warningDays !== null ? Number(warningDays) : undefined,
+    excludeSupplementTime: excludeSupplementTime === true || excludeSupplementTime === 1 || excludeSupplementTime === '1',
     flowConfig,
     status,
   });
@@ -54,18 +76,59 @@ router.post('/', authMiddleware, requireRole('admin'), (req, res) => {
 
 router.put('/:id', authMiddleware, requireRole('admin'), (req, res) => {
   const { id } = req.params;
-  const { code, name, department, description, requiredMaterials, promiseDays, flowConfig, status } = req.body;
+  const { code, name, department, description, requiredMaterials, promiseDays, warningDays, excludeSupplementTime, flowConfig, status } = req.body;
 
-  const matter = updateMatter(id, {
+  if (flowConfig !== undefined) {
+    try {
+      const flowSteps = parseFlowConfig(flowConfig);
+      const validation = validateFlowConfig(flowSteps);
+      if (!validation.valid) {
+        res.json({
+          success: false,
+          message: '流程配置校验失败',
+          errors: validation.errors,
+          warnings: validation.warnings,
+        });
+        return;
+      }
+    } catch {
+      res.json({ success: false, message: '流程配置JSON格式错误' });
+      return;
+    }
+  }
+
+  const updateData: Partial<{
+    code: string;
+    name: string;
+    department: string;
+    description: string;
+    requiredMaterials: string;
+    promiseDays: number;
+    warningDays: number;
+    excludeSupplementTime: boolean;
+    flowConfig: string;
+    status: string;
+  }> = {
     code,
     name,
     department,
     description,
     requiredMaterials,
-    promiseDays: promiseDays ? Number(promiseDays) : undefined,
     flowConfig,
     status,
-  });
+  };
+
+  if (promiseDays !== undefined && promiseDays !== null) {
+    updateData.promiseDays = Number(promiseDays);
+  }
+  if (warningDays !== undefined) {
+    updateData.warningDays = warningDays === null ? null as any : Number(warningDays);
+  }
+  if (excludeSupplementTime !== undefined) {
+    updateData.excludeSupplementTime = excludeSupplementTime === true || excludeSupplementTime === 1 || excludeSupplementTime === '1';
+  }
+
+  const matter = updateMatter(id, updateData);
 
   if (!matter) {
     res.json({ success: false, message: '事项不存在' });

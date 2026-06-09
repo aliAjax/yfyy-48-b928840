@@ -132,6 +132,10 @@ export default function MatterListPage({ isAdmin = false }: MatterListPageProps)
                         <ClockCircleOutlined style={{ marginRight: 4 }} />
                         承诺办结：{matter.promiseDays} 个工作日
                       </div>
+                      <div style={{ display: 'flex', alignItems: 'center', color: '#999', fontSize: 12, marginTop: 4 }}>
+                        提前预警：{matter.warningDays ?? 3} 天
+                        {matter.excludeSupplementTime && <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>排除补正时间</Tag>}
+                      </div>
                     </div>
                   }
                 />
@@ -171,6 +175,10 @@ export default function MatterListPage({ isAdmin = false }: MatterListPageProps)
             <Descriptions.Item label="事项名称">{selectedMatter.name}</Descriptions.Item>
             <Descriptions.Item label="办理部门">{selectedMatter.department}</Descriptions.Item>
             <Descriptions.Item label="承诺时限">{selectedMatter.promiseDays} 个工作日</Descriptions.Item>
+            <Descriptions.Item label="提前预警天数">{selectedMatter.warningDays ?? 3} 天</Descriptions.Item>
+            <Descriptions.Item label="排除补正等待时间">
+              {selectedMatter.excludeSupplementTime ? '是（计算超期时扣除补正天数）' : '否'}
+            </Descriptions.Item>
             <Descriptions.Item label="事项描述">{selectedMatter.description || '暂无'}</Descriptions.Item>
             <Descriptions.Item label="所需材料">
               {requiredMaterials.length > 0 ? (

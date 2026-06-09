@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Switch, Tag, Tabs } from 'antd';
+import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Tabs, Checkbox } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { listMatters, createMatter, updateMatter, deleteMatter, getMatter } from '../api/matterApi';
-import { Matter } from '../types';
-import { safeJSONParse } from '../utils/common';
+import { Matter, FlowStep } from '../types';
+import { safeJSONParse, validateFlowConfig, FlowValidationResult } from '../utils/common';
 import FlowConfigurator from '../components/FlowConfigurator';
 
 const { TextArea } = Input;
@@ -19,6 +19,7 @@ export default function MatterManagePage() {
   const [form] = Form.useForm();
   const [materialsText, setMaterialsText] = useState('');
   const [flowText, setFlowText] = useState('');
+  const [flowValidation, setFlowValidation] = useState<FlowValidationResult | null>(null);
 
   useEffect(() => {
     loadMatters();
@@ -50,6 +51,10 @@ export default function MatterManagePage() {
       { step: 4, name: '办结出证', role: 'window', status: 'approved', description: '窗口人员办结发证' },
       { step: 5, name: '已办结', role: 'window', status: 'completed', description: '申请已办结' },
     ], null, 2));
+    form.setFieldsValue({
+      warningDays: 3,
+      excludeSupplementTime: false,
+    });
     setModalVisible(true);
   };
 
@@ -61,6 +66,8 @@ export default function MatterManagePage() {
       department: record.department,
       description: record.description,
       promiseDays: record.promiseDays,
+      warningDays: record.warningDays ?? 3,
+      excludeSupplementTime: record.excludeSupplementTime ?? false,
       status: record.status,
     });
     setMaterialsText(record.requiredMaterials);
@@ -97,8 +104,70 @@ export default function MatterManagePage() {
         return;
       }
 
+      let flowSteps: FlowStep[] = [];
+      try {
+        flowSteps = JSON.parse(flowText);
+      } catch {
+        message.error('流程配置JSON格式错误');
+        return;
+      }
+
+      const validation = validateFlowConfig(flowSteps);
+      if (!validation.valid) {
+        Modal.error({
+          title: '流程配置校验失败',
+          content: (
+            <div>
+              <p>请修正以下错误后再保存：</p>
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {validation.errors.map((err, idx) => (
+                  <li key={idx} style={{ color: '#ff4d4f', marginBottom: 4 }}>{err}</li>
+                ))}
+              </ul>
+              {validation.warnings.length > 0 && (
+                <>
+                  <p style={{ marginTop: 12 }}>同时有以下建议：</p>
+                  <ul style={{ margin: 0, paddingLeft: 20 }}>
+                    {validation.warnings.map((warn, idx) => (
+                      <li key={idx} style={{ color: '#faad14', marginBottom: 4 }}>{warn}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          ),
+        });
+        return;
+      }
+
+      if (validation.warnings.length > 0) {
+        const confirmed = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+            title: '流程配置存在建议项',
+            content: (
+              <div>
+                <p>配置可以保存，但建议优化以下内容：</p>
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {validation.warnings.map((warn, idx) => (
+                    <li key={idx}>{warn}</li>
+                  ))}
+                </ul>
+                <p style={{ marginTop: 12 }}>是否确认保存？</p>
+              </div>
+            ),
+            okText: '确认保存',
+            cancelText: '返回修改',
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+        if (!confirmed) return;
+      }
+
       const data = {
         ...values,
+        warningDays: values.warningDays ?? 3,
+        excludeSupplementTime: values.excludeSupplementTime ?? false,
         requiredMaterials: JSON.stringify(materialsParsed),
         flowConfig: flowText,
       };
@@ -144,6 +213,24 @@ export default function MatterManagePage() {
       key: 'promiseDays',
       width: 100,
       render: (days: number) => `${days} 个工作日`,
+    },
+    {
+      title: '提前预警',
+      dataIndex: 'warningDays',
+      key: 'warningDays',
+      width: 100,
+      render: (days: number | undefined) => days !== undefined ? `${days} 天` : '3 天(默认)',
+    },
+    {
+      title: '排除补正时间',
+      dataIndex: 'excludeSupplementTime',
+      key: 'excludeSupplementTime',
+      width: 120,
+      render: (val: boolean | undefined) => (
+        <Tag color={val ? 'blue' : 'default'}>
+          {val ? '是' : '否'}
+        </Tag>
+      ),
     },
     {
       title: '状态',
@@ -253,6 +340,15 @@ export default function MatterManagePage() {
                 <InputNumber min={1} style={{ width: '100%' }} />
               </Form.Item>
               <Form.Item
+                label="提前预警天数"
+                name="warningDays"
+                initialValue={3}
+                style={{ width: 180, marginBottom: 0 }}
+                extra="默认3天"
+              >
+                <InputNumber min={1} style={{ width: '100%' }} placeholder="预警天数" />
+              </Form.Item>
+              <Form.Item
                 label="状态"
                 name="status"
                 initialValue="active"
@@ -264,6 +360,14 @@ export default function MatterManagePage() {
                 </Select>
               </Form.Item>
             </Space>
+            <Form.Item
+              name="excludeSupplementTime"
+              valuePropName="checked"
+              initialValue={false}
+              style={{ marginBottom: 0 }}
+            >
+              <Checkbox>排除补正等待时间（计算超期时扣除补正天数）</Checkbox>
+            </Form.Item>
             <Form.Item
               label="事项描述"
               name="description"
@@ -294,6 +398,7 @@ export default function MatterManagePage() {
                     <FlowConfigurator
                       value={flowText}
                       onChange={(val) => setFlowText(val)}
+                      onValidationChange={(result) => setFlowValidation(result)}
                     />
                   ),
                 },

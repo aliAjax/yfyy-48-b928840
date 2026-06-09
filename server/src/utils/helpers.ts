@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { WarningStatus, ApplicationStatus, FlowStep, UserRole } from '../types';
+import { WarningStatus, ApplicationStatus, FlowStep, UserRole, MatterMaterial, ApplicationMaterial, MaterialFile } from '../types';
 
 export function generateId(): string {
   return uuidv4();
@@ -31,12 +31,51 @@ export function toJSON(obj: any): string {
   return JSON.stringify(obj);
 }
 
-const WARNING_THRESHOLD_DAYS = 3;
+const DEFAULT_WARNING_DAYS = 3;
+
+export function calculateSupplementDays(
+  logs: Array<{ action: string; createdAt: string; newStatus?: string }>
+): number {
+  if (!logs || logs.length === 0) return 0;
+
+  const sortedLogs = [...logs].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+
+  let supplementDays = 0;
+  let supplementStart: Date | null = null;
+
+  for (const log of sortedLogs) {
+    if (log.action === 'supplement' && !supplementStart) {
+      supplementStart = new Date(log.createdAt);
+    } else if (
+      supplementStart &&
+      (log.action === 'submit' ||
+        (log.newStatus && log.newStatus !== 'supplement' && log.newStatus !== 'draft'))
+    ) {
+      const endDate = new Date(log.createdAt);
+      const diff = endDate.getTime() - supplementStart.getTime();
+      supplementDays += Math.ceil(diff / (1000 * 60 * 60 * 24));
+      supplementStart = null;
+    }
+  }
+
+  if (supplementStart) {
+    const nowDate = new Date();
+    const diff = nowDate.getTime() - supplementStart.getTime();
+    supplementDays += Math.ceil(diff / (1000 * 60 * 60 * 24));
+  }
+
+  return supplementDays;
+}
 
 export function calculateWarningStatus(
   acceptTime: string | undefined,
   promiseDays: number | undefined,
-  status: ApplicationStatus
+  status: ApplicationStatus,
+  warningDays?: number,
+  excludeSupplementTime?: boolean,
+  supplementDays?: number
 ): { warningStatus: WarningStatus; remainingDays: number | undefined } {
   if (!acceptTime || !promiseDays) {
     return { warningStatus: 'none', remainingDays: undefined };
@@ -47,17 +86,20 @@ export function calculateWarningStatus(
     return { warningStatus: 'none', remainingDays: undefined };
   }
 
+  const effectiveWarningDays = warningDays ?? DEFAULT_WARNING_DAYS;
+  const effectiveSupplementDays = excludeSupplementTime ? (supplementDays || 0) : 0;
+
   const acceptDate = new Date(acceptTime);
   const nowDate = new Date();
   const deadlineDate = new Date(acceptDate);
-  deadlineDate.setDate(deadlineDate.getDate() + promiseDays);
+  deadlineDate.setDate(deadlineDate.getDate() + promiseDays + effectiveSupplementDays);
 
   const diffTime = deadlineDate.getTime() - nowDate.getTime();
   const remainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
   if (remainingDays < 0) {
     return { warningStatus: 'overdue', remainingDays };
-  } else if (remainingDays <= WARNING_THRESHOLD_DAYS) {
+  } else if (remainingDays <= effectiveWarningDays) {
     return { warningStatus: 'warning', remainingDays };
   } else {
     return { warningStatus: 'normal', remainingDays };
@@ -151,4 +193,149 @@ export function getNextStep(flowSteps: FlowStep[], currentStatus: ApplicationSta
     if (step) return step;
   }
   return null;
+}
+
+export interface MaterialCompletenessInfo {
+  totalRequired: number;
+  completedRequired: number;
+  isComplete: boolean;
+  missingMaterials: string[];
+}
+
+export function calculateMaterialCompleteness(
+  requiredMaterialsStr: string | null | undefined,
+  appMaterialsStr: string | null | undefined,
+  files: MaterialFile[] = []
+): MaterialCompletenessInfo {
+  const requiredMaterials = parseJSON<MatterMaterial[]>(requiredMaterialsStr, []);
+  const appMaterials = parseJSON<ApplicationMaterial[]>(appMaterialsStr, []);
+
+  const requiredList = requiredMaterials.filter(m => m.required);
+
+  if (requiredList.length === 0) {
+    return {
+      totalRequired: 0,
+      completedRequired: 0,
+      isComplete: true,
+      missingMaterials: [],
+    };
+  }
+
+  const appMaterialMap = new Map<string, ApplicationMaterial>();
+  appMaterials.forEach(m => {
+    appMaterialMap.set(m.name, m);
+  });
+
+  const fileNames = new Set(files.map(f => f.originalName));
+
+  let completedCount = 0;
+  const missingList: string[] = [];
+
+  requiredList.forEach(req => {
+    const appMat = appMaterialMap.get(req.name);
+    const hasFile = fileNames.has(req.name);
+    const isCompleted = (appMat && appMat.checked) || hasFile;
+
+    if (isCompleted) {
+      completedCount++;
+    } else {
+      missingList.push(req.name);
+    }
+  });
+
+  return {
+    totalRequired: requiredList.length,
+    completedRequired: completedCount,
+    isComplete: completedCount === requiredList.length,
+    missingMaterials: missingList,
+  };
+}
+
+const STATUS_LABELS: Record<ApplicationStatus, string> = {
+  draft: '草稿',
+  submitted: '待受理',
+  accepted: '已受理',
+  supplement: '待补正',
+  reviewing: '审核中',
+  approved: '审核通过',
+  rejected: '已退回',
+  completed: '已办结',
+};
+
+export const STATUS_ORDER: ApplicationStatus[] = [
+  'draft', 'submitted', 'accepted', 'supplement', 'reviewing', 'approved', 'rejected', 'completed'
+];
+
+export interface FlowValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export function validateFlowConfig(steps: FlowStep[]): FlowValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!steps || steps.length === 0) {
+    errors.push('流程步骤不能为空');
+    return { valid: false, errors, warnings };
+  }
+
+  const statuses = steps.map(s => s.status).filter(Boolean) as ApplicationStatus[];
+
+  const statusSet = new Set<string>();
+  const duplicateStatuses: string[] = [];
+  statuses.forEach(status => {
+    if (statusSet.has(status)) {
+      duplicateStatuses.push(STATUS_LABELS[status] || status);
+    } else {
+      statusSet.add(status);
+    }
+  });
+  if (duplicateStatuses.length > 0) {
+    errors.push(`存在重复状态：${duplicateStatuses.join('、')}`);
+  }
+
+  const hasCompleted = steps.some(s => s.status === 'completed');
+  if (!hasCompleted) {
+    errors.push('缺少办结环节（状态为"已办结"的步骤）');
+  }
+
+  let lastStatusIndex = -1;
+  let orderError = false;
+  for (const step of steps) {
+    if (step.status) {
+      const idx = STATUS_ORDER.indexOf(step.status);
+      if (idx < lastStatusIndex) {
+        orderError = true;
+        break;
+      }
+      lastStatusIndex = idx;
+    }
+  }
+  if (orderError) {
+    errors.push('状态顺序不合理，请按流程先后顺序排列步骤');
+  }
+
+  steps.forEach((step, index) => {
+    if (!step.role) {
+      errors.push(`第 ${index + 1} 步「${step.name}」缺少可操作角色`);
+    }
+    if (!step.status && step.status !== undefined) {
+      warnings.push(`第 ${index + 1} 步「${step.name}」未设置对应状态`);
+    }
+  });
+
+  if (!steps.some(s => s.status === 'submitted')) {
+    warnings.push('建议包含"窗口受理"环节（状态为"待受理"）');
+  }
+  if (!steps.some(s => s.status === 'reviewing')) {
+    warnings.push('建议包含"业务审核"环节（状态为"审核中"）');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
 }

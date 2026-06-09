@@ -757,6 +757,12 @@ export default function ApplicationDetailPage() {
           <Descriptions.Item label="承诺时限">
             {application?.promiseDays ? `${application.promiseDays} 个工作日` : '-'}
           </Descriptions.Item>
+          <Descriptions.Item label="提前预警天数">
+            {application?.matterWarningDays !== undefined ? `${application.matterWarningDays} 天` : '3 天(默认)'}
+          </Descriptions.Item>
+          <Descriptions.Item label="排除补正时间">
+            {application?.matterExcludeSupplementTime ? '是' : '否'}
+          </Descriptions.Item>
           <Descriptions.Item label="当前环节">{application?.currentStep || '-'}</Descriptions.Item>
           <Descriptions.Item label="申请时间">
             {application?.submitTime ? dayjs(application.submitTime).format('YYYY-MM-DD HH:mm') : '-'}

@@ -11,7 +11,15 @@ import {
   MonthlyTrendItem,
   SupplementStats,
   FullStatsOverview,
+  SupplementAnalysisData,
+  SupplementReasonItem,
+  SupplementMatterItem,
+  SupplementMaterialItem,
+  SupplementRepeatItem,
+  ApplicationStatus,
 } from '../types';
+import { calculateWarningStatus, calculateSupplementDays } from '../utils/helpers';
+import { findMatterById } from './matterDao';
 
 function buildWhereClause(params: StatsFilterParams, requireSubmitTime: boolean = false): { where: string; values: any[] } {
   const whereClauses: string[] = [];
@@ -297,39 +305,54 @@ export function getUserStats(params: StatsFilterParams, role?: string): UserStat
 export function getWarningStats(params: StatsFilterParams): WarningStats {
   const { where, values } = buildWhereClause(params);
 
+  const activeStatuses: ApplicationStatus[] = ['submitted', 'accepted', 'supplement', 'reviewing', 'approved'];
+
   const sql = `
     SELECT
-      COUNT(*) as totalCount,
-      SUM(CASE 
-        WHEN a.status IN ('submitted', 'accepted', 'supplement', 'reviewing', 'approved')
-        AND a.accept_time IS NOT NULL
-        AND julianday('now') - julianday(a.accept_time) <= m.promise_days * 0.7
-        THEN 1 ELSE 0
-      END) as normalCount,
-      SUM(CASE 
-        WHEN a.status IN ('submitted', 'accepted', 'supplement', 'reviewing', 'approved')
-        AND a.accept_time IS NOT NULL
-        AND julianday('now') - julianday(a.accept_time) > m.promise_days * 0.7
-        AND julianday('now') - julianday(a.accept_time) <= m.promise_days
-        THEN 1 ELSE 0
-      END) as warningCount,
-      SUM(CASE 
-        WHEN a.status IN ('submitted', 'accepted', 'supplement', 'reviewing', 'approved')
-        AND a.accept_time IS NOT NULL
-        AND julianday('now') - julianday(a.accept_time) > m.promise_days
-        THEN 1 ELSE 0
-      END) as overdueCount
+      a.id,
+      a.status,
+      a.accept_time as acceptTime,
+      a.matter_id as matterId
     FROM applications a
     LEFT JOIN matters m ON a.matter_id = m.id
     ${where}
   `;
 
-  const row: any = db.prepare(sql).get(...values);
+  const rows: any[] = db.prepare(sql).all(...values);
+  const activeApps = rows.filter(r => activeStatuses.includes(r.status as ApplicationStatus) && r.acceptTime);
 
-  const totalCount = row.totalCount || 0;
-  const normalCount = row.normalCount || 0;
-  const warningCount = row.warningCount || 0;
-  const overdueCount = row.overdueCount || 0;
+  let normalCount = 0;
+  let warningCount = 0;
+  let overdueCount = 0;
+
+  for (const app of activeApps) {
+    const matter = findMatterById(app.matterId);
+    if (!matter) continue;
+
+    const logsSql = `
+      SELECT action, created_at as createdAt, new_status as newStatus
+      FROM operation_logs
+      WHERE application_id = ?
+      ORDER BY created_at ASC
+    `;
+    const logs: any[] = db.prepare(logsSql).all(app.id);
+    const supplementDays = calculateSupplementDays(logs);
+
+    const { warningStatus } = calculateWarningStatus(
+      app.acceptTime,
+      matter.promiseDays,
+      app.status,
+      matter.warningDays,
+      matter.excludeSupplementTime,
+      supplementDays
+    );
+
+    if (warningStatus === 'normal') normalCount++;
+    else if (warningStatus === 'warning') warningCount++;
+    else if (warningStatus === 'overdue') overdueCount++;
+  }
+
+  const totalCount = activeApps.length;
 
   return {
     totalCount,
@@ -423,5 +446,328 @@ export function getFullOverview(params: StatsFilterParams): FullStatsOverview {
     supplementRate: supplement.supplementRate,
     warningRate: warning.warningRate,
     overdueRate: warning.overdueRate,
+  };
+}
+
+function buildSupplementLogWhereClause(params: StatsFilterParams): { where: string; values: any[] } {
+  const whereClauses: string[] = ['l.action = ?'];
+  const values: any[] = ['supplement'];
+
+  if (params.startDate) {
+    whereClauses.push('DATE(l.created_at) >= DATE(?)');
+    values.push(params.startDate);
+  }
+  if (params.endDate) {
+    whereClauses.push('DATE(l.created_at) <= DATE(?)');
+    values.push(params.endDate);
+  }
+  if (params.department) {
+    whereClauses.push('m.department = ?');
+    values.push(params.department);
+  }
+  if (params.matterId) {
+    whereClauses.push('a.matter_id = ?');
+    values.push(params.matterId);
+  }
+
+  return {
+    where: whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '',
+    values,
+  };
+}
+
+function buildReviewOpinionWhereClause(params: StatsFilterParams): { where: string; values: any[] } {
+  const whereClauses: string[] = ['ro.status = ?'];
+  const values: any[] = ['problem'];
+
+  if (params.startDate) {
+    whereClauses.push('DATE(ro.created_at) >= DATE(?)');
+    values.push(params.startDate);
+  }
+  if (params.endDate) {
+    whereClauses.push('DATE(ro.created_at) <= DATE(?)');
+    values.push(params.endDate);
+  }
+  if (params.department) {
+    whereClauses.push('m.department = ?');
+    values.push(params.department);
+  }
+  if (params.matterId) {
+    whereClauses.push('a.matter_id = ?');
+    values.push(params.matterId);
+  }
+
+  return {
+    where: whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '',
+    values,
+  };
+}
+
+function extractSupplementReason(description: string): string {
+  if (!description) return '未填写原因';
+  const colonIndex = description.indexOf('：');
+  if (colonIndex > 0 && colonIndex < description.length - 1) {
+    const reason = description.substring(colonIndex + 1).trim();
+    if (reason) return reason;
+  }
+  return description || '未填写原因';
+}
+
+function normalizeReason(reason: string): string {
+  if (!reason) return '未填写原因';
+  const trimmed = reason.trim();
+  if (!trimmed) return '未填写原因';
+  
+  if (trimmed.includes('材料不完整') || trimmed.includes('材料缺失') || trimmed.includes('缺少材料')) {
+    return '材料不完整/缺失';
+  }
+  if (trimmed.includes('信息') && (trimmed.includes('不完整') || trimmed.includes('缺失') || trimmed.includes('错误') || trimmed.includes('有误'))) {
+    return '申请信息有误/不完整';
+  }
+  if (trimmed.includes('格式') && (trimmed.includes('不正确') || trimmed.includes('错误') || trimmed.includes('不符'))) {
+    return '材料格式不正确';
+  }
+  if (trimmed.includes('签字') || trimmed.includes('盖章') || trimmed.includes('签名')) {
+    return '缺少签字/盖章';
+  }
+  if (trimmed.includes('有效期') || trimmed.includes('过期') || trimmed.includes('失效')) {
+    return '材料已过期/失效';
+  }
+  if (trimmed.includes('模糊') || trimmed.includes('不清') || trimmed.includes('扫描件') || trimmed.includes('不清晰')) {
+    return '材料不清晰/扫描质量差';
+  }
+  if (trimmed.includes('身份证') || trimmed.includes('身份信息')) {
+    return '身份证明材料问题';
+  }
+  if (trimmed.includes('照片') || trimmed.includes('图片')) {
+    return '照片/图片材料问题';
+  }
+  if (trimmed.includes('内容') && (trimmed.includes('不符') || trimmed.includes('不一致') || trimmed.includes('错误'))) {
+    return '材料内容与实际不符';
+  }
+  
+  return trimmed;
+}
+
+export function getSupplementAnalysis(params: StatsFilterParams): SupplementAnalysisData {
+  const logWhere = buildSupplementLogWhereClause(params);
+  const opinionWhere = buildReviewOpinionWhereClause(params);
+
+  const supplementLogsSql = `
+    SELECT 
+      l.id,
+      l.application_id as applicationId,
+      l.description,
+      l.created_at as createdAt,
+      a.application_no as applicationNo,
+      a.matter_id as matterId,
+      m.name as matterName,
+      m.department as department,
+      u.name as applicantName
+    FROM operation_logs l
+    INNER JOIN applications a ON l.application_id = a.id
+    LEFT JOIN matters m ON a.matter_id = m.id
+    LEFT JOIN users u ON a.applicant_id = u.id
+    ${logWhere.where}
+    ORDER BY l.created_at DESC
+  `;
+
+  const reviewOpinionsSql = `
+    SELECT 
+      ro.id,
+      ro.application_id as applicationId,
+      ro.material_name as materialName,
+      ro.opinion,
+      ro.created_at as createdAt,
+      a.application_no as applicationNo,
+      a.matter_id as matterId,
+      m.name as matterName,
+      m.department as department,
+      u.name as applicantName
+    FROM review_opinions ro
+    INNER JOIN applications a ON ro.application_id = a.id
+    LEFT JOIN matters m ON a.matter_id = m.id
+    LEFT JOIN users u ON a.applicant_id = u.id
+    ${opinionWhere.where}
+    ORDER BY ro.created_at DESC
+  `;
+
+  const supplementLogs: any[] = db.prepare(supplementLogsSql).all(...logWhere.values);
+  const reviewOpinions: any[] = db.prepare(reviewOpinionsSql).all(...opinionWhere.values);
+
+  const applicationSupplementMap = new Map<string, { count: number; reasons: string[]; appInfo: any }>();
+
+  for (const log of supplementLogs) {
+    const appId = log.applicationId;
+    const rawReason = extractSupplementReason(log.description);
+    const reason = normalizeReason(rawReason);
+    
+    if (!applicationSupplementMap.has(appId)) {
+      applicationSupplementMap.set(appId, {
+        count: 0,
+        reasons: [],
+        appInfo: log,
+      });
+    }
+    const entry = applicationSupplementMap.get(appId)!;
+    entry.count++;
+    if (reason && !entry.reasons.includes(reason)) {
+      entry.reasons.push(reason);
+    }
+  }
+
+  for (const op of reviewOpinions) {
+    const appId = op.applicationId;
+    const reason = normalizeReason(op.opinion || op.materialName + '存在问题');
+    
+    if (!applicationSupplementMap.has(appId)) {
+      applicationSupplementMap.set(appId, {
+        count: 0,
+        reasons: [],
+        appInfo: op,
+      });
+    }
+    const entry = applicationSupplementMap.get(appId)!;
+    entry.count++;
+    if (reason && !entry.reasons.includes(reason)) {
+      entry.reasons.push(reason);
+    }
+  }
+
+  const reasonCounter = new Map<string, { count: number; applicationIds: string[] }>();
+
+  for (const log of supplementLogs) {
+    const rawReason = extractSupplementReason(log.description);
+    const reason = normalizeReason(rawReason);
+    
+    if (!reasonCounter.has(reason)) {
+      reasonCounter.set(reason, { count: 0, applicationIds: [] });
+    }
+    const entry = reasonCounter.get(reason)!;
+    entry.count++;
+    if (!entry.applicationIds.includes(log.applicationId)) {
+      entry.applicationIds.push(log.applicationId);
+    }
+  }
+
+  for (const op of reviewOpinions) {
+    const reason = normalizeReason(op.opinion || op.materialName + '存在问题');
+    if (!reasonCounter.has(reason)) {
+      reasonCounter.set(reason, { count: 0, applicationIds: [] });
+    }
+    const entry = reasonCounter.get(reason)!;
+    entry.count++;
+    if (!entry.applicationIds.includes(op.applicationId)) {
+      entry.applicationIds.push(op.applicationId);
+    }
+  }
+
+  const topReasons: SupplementReasonItem[] = Array.from(reasonCounter.entries())
+    .map(([reason, data]) => ({
+      reason,
+      count: data.count,
+      applicationIds: data.applicationIds,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 20);
+
+  const matterCounter = new Map<string, SupplementMatterItem>();
+
+  for (const log of supplementLogs) {
+    const matterId = log.matterId;
+    if (!matterId) continue;
+    if (!matterCounter.has(matterId)) {
+      matterCounter.set(matterId, {
+        matterId,
+        matterName: log.matterName || '未知事项',
+        department: log.department || '未分类',
+        supplementCount: 0,
+        applicationIds: [],
+      });
+    }
+    const entry = matterCounter.get(matterId)!;
+    entry.supplementCount++;
+    if (!entry.applicationIds.includes(log.applicationId)) {
+      entry.applicationIds.push(log.applicationId);
+    }
+  }
+
+  for (const op of reviewOpinions) {
+    const matterId = op.matterId;
+    if (!matterId) continue;
+    if (!matterCounter.has(matterId)) {
+      matterCounter.set(matterId, {
+        matterId,
+        matterName: op.matterName || '未知事项',
+        department: op.department || '未分类',
+        supplementCount: 0,
+        applicationIds: [],
+      });
+    }
+    const entry = matterCounter.get(matterId)!;
+    entry.supplementCount++;
+    if (!entry.applicationIds.includes(op.applicationId)) {
+      entry.applicationIds.push(op.applicationId);
+    }
+  }
+
+  const topMatters: SupplementMatterItem[] = Array.from(matterCounter.values())
+    .sort((a, b) => b.supplementCount - a.supplementCount)
+    .slice(0, 15);
+
+  const materialCounter = new Map<string, { count: number; applicationIds: string[] }>();
+
+  for (const op of reviewOpinions) {
+    const materialName = op.materialName || '未命名材料';
+    if (!materialCounter.has(materialName)) {
+      materialCounter.set(materialName, { count: 0, applicationIds: [] });
+    }
+    const entry = materialCounter.get(materialName)!;
+    entry.count++;
+    if (!entry.applicationIds.includes(op.applicationId)) {
+      entry.applicationIds.push(op.applicationId);
+    }
+  }
+
+  const topMaterials: SupplementMaterialItem[] = Array.from(materialCounter.entries())
+    .map(([materialName, data]) => ({
+      materialName,
+      problemCount: data.count,
+      applicationIds: data.applicationIds,
+    }))
+    .sort((a, b) => b.problemCount - a.problemCount)
+    .slice(0, 15);
+
+  const repeatedSupplements: SupplementRepeatItem[] = Array.from(applicationSupplementMap.entries())
+    .filter(([_, data]) => data.count > 1)
+    .map(([applicationId, data]) => ({
+      applicationId,
+      applicationNo: data.appInfo?.applicationNo || '',
+      matterName: data.appInfo?.matterName || '未知事项',
+      applicantName: data.appInfo?.applicantName || '',
+      supplementCount: data.count,
+      reasons: data.reasons,
+    }))
+    .sort((a, b) => b.supplementCount - a.supplementCount)
+    .slice(0, 20);
+
+  const totalSupplementCount = supplementLogs.length + reviewOpinions.length;
+  const totalApplicationsWithSupplement = applicationSupplementMap.size;
+  const maxSupplementCount = repeatedSupplements.length > 0 ? repeatedSupplements[0].supplementCount : 0;
+  const avgSupplementPerApplication = totalApplicationsWithSupplement > 0
+    ? Number((totalSupplementCount / totalApplicationsWithSupplement).toFixed(2))
+    : 0;
+
+  return {
+    overview: {
+      totalSupplementCount,
+      totalApplicationsWithSupplement,
+      avgSupplementPerApplication,
+      maxSupplementCount,
+    },
+    topReasons,
+    topMatters,
+    topMaterials,
+    repeatedSupplements,
   };
 }
