@@ -35,10 +35,6 @@ export function deleteTemplate(id: string): Promise<ApiResponse<boolean>> {
   return request.delete(`/templates/${id}`);
 }
 
-export function copyTemplate(id: string): Promise<ApiResponse<ApplicationTemplate>> {
-  return request.post(`/templates/${id}/copy`);
-}
-
 export function applyTemplate(id: string): Promise<ApiResponse<Application>> {
   return request.post(`/templates/${id}/apply`);
 }

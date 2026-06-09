@@ -1,21 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Badge, Popover, List, Button, Typography, Space, Empty, Spin, Tabs, Switch } from 'antd';
+import { Badge, Popover, List, Button, Typography, Space, Empty, Spin } from 'antd';
 import { BellOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { Notification, NotificationType } from '../types';
+import { Notification } from '../types';
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead } from '../api/notificationApi';
 
 const { Text, Paragraph } = Typography;
-
-const typeFilters: { key: string; label: string; types: NotificationType[] }[] = [
-  { key: 'all', label: '全部', types: [] },
-  { key: 'submit', label: '提交', types: ['submit'] },
-  { key: 'accept', label: '受理', types: ['accept'] },
-  { key: 'supplement', label: '补正', types: ['supplement'] },
-  { key: 'reject', label: '退回', types: ['reject'] },
-  { key: 'review', label: '审核', types: ['review_pass', 'review_reject', 'send_review'] },
-  { key: 'complete', label: '办结', types: ['complete'] },
-];
 
 export default function NotificationPanel() {
   const [open, setOpen] = useState(false);
@@ -24,8 +14,6 @@ export default function NotificationPanel() {
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [activeType, setActiveType] = useState('all');
-  const [onlyUnread, setOnlyUnread] = useState(false);
   const pageSize = 10;
   const navigate = useNavigate();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -39,23 +27,10 @@ export default function NotificationPanel() {
     }
   };
 
-  const getTypeParam = () => {
-    const filter = typeFilters.find(f => f.key === activeType);
-    if (filter && filter.types.length > 0) {
-      return filter.types.join(',');
-    }
-    return undefined;
-  };
-
   const fetchNotifications = async (pageNum: number = 1) => {
     setLoading(true);
     try {
-      const result = await getNotifications({
-        page: pageNum,
-        pageSize,
-        isRead: onlyUnread ? false : undefined,
-        type: getTypeParam(),
-      });
+      const result = await getNotifications({ page: pageNum, pageSize });
       if (pageNum === 1) {
         setNotifications(result.data);
       } else {
@@ -84,29 +59,12 @@ export default function NotificationPanel() {
     }
   };
 
-  const handleTypeChange = (key: string) => {
-    setActiveType(key);
-    setPage(1);
-    fetchNotifications(1);
-  };
-
-  const handleOnlyUnreadChange = (checked: boolean) => {
-    setOnlyUnread(checked);
-    setPage(1);
-    fetchNotifications(1);
-  };
-
   const handleMarkAsRead = async (id: string) => {
     try {
       await markAsRead(id);
-      if (onlyUnread) {
-        setNotifications(prev => prev.filter(n => n.id !== id));
-        setTotal(prev => Math.max(0, prev - 1));
-      } else {
-        setNotifications(prev => prev.map(n => 
-          n.id === id ? { ...n, isRead: true } : n
-        ));
-      }
+      setNotifications(prev => prev.map(n => 
+        n.id === id ? { ...n, isRead: true } : n
+      ));
       setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (e) {
       // silently fail
@@ -115,19 +73,9 @@ export default function NotificationPanel() {
 
   const handleMarkAllAsRead = async () => {
     try {
-      const typeParam = getTypeParam();
-      const result = await markAllAsRead(typeParam ? { type: typeParam } : undefined);
-      
-      if (onlyUnread || typeParam) {
-        setNotifications([]);
-        setTotal(0);
-        fetchNotifications(1);
-      } else {
-        setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-      }
-      
-      const unreadRemaining = unreadCount - (result.count || 0);
-      setUnreadCount(Math.max(0, unreadRemaining));
+      const result = await markAllAsRead();
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+      setUnreadCount(0);
     } catch (e) {
       // silently fail
     }
@@ -164,13 +112,8 @@ export default function NotificationPanel() {
     return date.toLocaleDateString('zh-CN');
   };
 
-  const tabItems = typeFilters.map(filter => ({
-    key: filter.key,
-    label: filter.label,
-  }));
-
   const content = (
-    <div style={{ width: 380 }}>
+    <div style={{ width: 360 }}>
       <div style={{ 
         padding: '12px 16px', 
         borderBottom: '1px solid #f0f0f0',
@@ -190,30 +133,7 @@ export default function NotificationPanel() {
           </Button>
         )}
       </div>
-      <div style={{ padding: '8px 16px 0 16px' }}>
-        <Tabs
-          activeKey={activeType}
-          onChange={handleTypeChange}
-          items={tabItems}
-          size="small"
-          style={{ marginBottom: 0 }}
-        />
-      </div>
-      <div style={{ 
-        padding: '0 16px 8px 16px', 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        borderBottom: '1px solid #f0f0f0'
-      }}>
-        <Text type="secondary" style={{ fontSize: 12 }}>只看未读</Text>
-        <Switch 
-          size="small" 
-          checked={onlyUnread} 
-          onChange={handleOnlyUnreadChange} 
-        />
-      </div>
-      <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+      <div style={{ maxHeight: 400, overflowY: 'auto' }}>
         {loading && notifications.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center' }}>
             <Spin />

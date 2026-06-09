@@ -37,13 +37,6 @@ function migrateDatabase() {
     db.exec("ALTER TABLE review_opinions ADD COLUMN updated_at TEXT");
   }
 
-  const appColumns = db.prepare("PRAGMA table_info(applications)").all() as { name: string }[];
-  const appColNames = appColumns.map(c => c.name);
-  
-  if (!appColNames.includes('flow_snapshot')) {
-    db.exec("ALTER TABLE applications ADD COLUMN flow_snapshot TEXT");
-  }
-
   const matterColumns = db.prepare("PRAGMA table_info(matters)").all() as { name: string }[];
   const matterColNames = matterColumns.map(c => c.name);
   
@@ -102,7 +95,6 @@ function initDatabase() {
       submit_time TEXT,
       accept_time TEXT,
       complete_time TEXT,
-      flow_snapshot TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (matter_id) REFERENCES matters(id),

@@ -10,7 +10,6 @@ export const getNotifications = async (params?: {
   page?: number;
   pageSize?: number;
   isRead?: boolean;
-  type?: string;
 }): Promise<{ data: Notification[]; total: number }> => {
   const res = await request.get<any, ApiResponse<Notification[]>>('/notifications', {
     params,
@@ -25,9 +24,7 @@ export const markAsRead = async (id: string): Promise<void> => {
   await request.put(`/notifications/${id}/read`);
 };
 
-export const markAllAsRead = async (data?: {
-  type?: string;
-}): Promise<{ count: number }> => {
-  const res = await request.put<any, ApiResponse<{ count: number }>>('/notifications/read-all', data);
+export const markAllAsRead = async (): Promise<{ count: number }> => {
+  const res = await request.put<any, ApiResponse<{ count: number }>>('/notifications/read-all');
   return res.data || { count: 0 };
 };

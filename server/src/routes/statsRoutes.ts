@@ -12,7 +12,6 @@ import {
   getMonthlyTrend,
   getSupplementStats,
   getFullOverview,
-  getSupplementAnalysis,
 } from '../dao/statsDao';
 import { StatsFilterParams } from '../types';
 
@@ -83,11 +82,6 @@ router.get('/supplement-stats', authMiddleware, requireRole('admin'), (req: Auth
 
 router.get('/departments', authMiddleware, requireRole('admin'), (req: AuthRequest, res) => {
   const data = getDepartmentList();
-  res.json({ success: true, data });
-});
-
-router.get('/supplement-analysis', authMiddleware, requireRole('admin'), (req: AuthRequest, res) => {
-  const data = getSupplementAnalysis(getFilterParams(req));
   res.json({ success: true, data });
 });
 

@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { findMatterById, listMatters, createMatter, updateMatter, deleteMatter } from '../dao/matterDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
-import { validateFlowConfig, parseFlowConfig } from '../utils/helpers';
 
 const router = Router();
 
@@ -39,25 +38,6 @@ router.post('/', authMiddleware, requireRole('admin'), (req, res) => {
     return;
   }
 
-  if (flowConfig) {
-    try {
-      const flowSteps = parseFlowConfig(flowConfig);
-      const validation = validateFlowConfig(flowSteps);
-      if (!validation.valid) {
-        res.json({
-          success: false,
-          message: '流程配置校验失败',
-          errors: validation.errors,
-          warnings: validation.warnings,
-        });
-        return;
-      }
-    } catch {
-      res.json({ success: false, message: '流程配置JSON格式错误' });
-      return;
-    }
-  }
-
   const matter = createMatter({
     code,
     name,
@@ -77,25 +57,6 @@ router.post('/', authMiddleware, requireRole('admin'), (req, res) => {
 router.put('/:id', authMiddleware, requireRole('admin'), (req, res) => {
   const { id } = req.params;
   const { code, name, department, description, requiredMaterials, promiseDays, warningDays, excludeSupplementTime, flowConfig, status } = req.body;
-
-  if (flowConfig !== undefined) {
-    try {
-      const flowSteps = parseFlowConfig(flowConfig);
-      const validation = validateFlowConfig(flowSteps);
-      if (!validation.valid) {
-        res.json({
-          success: false,
-          message: '流程配置校验失败',
-          errors: validation.errors,
-          warnings: validation.warnings,
-        });
-        return;
-      }
-    } catch {
-      res.json({ success: false, message: '流程配置JSON格式错误' });
-      return;
-    }
-  }
 
   const updateData: Partial<{
     code: string;

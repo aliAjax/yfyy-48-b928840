@@ -1,9 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Table, Card, Input, Select, Button, Space, Tag, Modal, message, Alert, Tooltip } from 'antd';
-import { SearchOutlined, ReloadOutlined, CheckOutlined, ExclamationOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { Table, Card, Input, Select, Button, Space, Tag, Modal, message, Alert } from 'antd';
+import { SearchOutlined, ReloadOutlined, CheckOutlined, ExclamationOutlined, FileTextOutlined } from '@ant-design/icons';
 import { listApplications, batchAcceptApplications, batchSupplementApplications } from '../api/applicationApi';
 import { listMatters } from '../api/matterApi';
-import { Application, ApplicationStatus, Matter, BatchOperationResult, BatchOperationItem, MaterialCompletenessInfo } from '../types';
+import { Application, ApplicationStatus, Matter, BatchOperationResult, BatchOperationItem } from '../types';
 import { statusLabels, statusColors, safeJSONParse, canOperateStep } from '../utils/common';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -17,7 +17,6 @@ export default function BatchAcceptWorkbenchPage() {
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [matterFilter, setMatterFilter] = useState<string>('');
-  const [materialCompletenessFilter, setMaterialCompletenessFilter] = useState<string>('');
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [matters, setMatters] = useState<Matter[]>([]);
   const [batchResult, setBatchResult] = useState<BatchOperationResult | null>(null);
@@ -35,7 +34,7 @@ export default function BatchAcceptWorkbenchPage() {
 
   useEffect(() => {
     loadApplications();
-  }, [page, pageSize, keyword, matterFilter, materialCompletenessFilter]);
+  }, [page, pageSize, keyword, matterFilter]);
 
   const loadMatters = async () => {
     try {
@@ -52,7 +51,6 @@ export default function BatchAcceptWorkbenchPage() {
       const params: any = { page, pageSize, status: 'submitted' as ApplicationStatus };
       if (keyword) params.keyword = keyword;
       if (matterFilter) params.matterId = matterFilter;
-      if (materialCompletenessFilter) params.materialCompleteness = materialCompletenessFilter;
 
       const res = await listApplications(params);
       if (res.success) {
@@ -73,7 +71,6 @@ export default function BatchAcceptWorkbenchPage() {
   const handleReset = () => {
     setKeyword('');
     setMatterFilter('');
-    setMaterialCompletenessFilter('');
     setPage(1);
   };
 
@@ -91,24 +88,9 @@ export default function BatchAcceptWorkbenchPage() {
       return;
     }
 
-    const content = (
-      <div>
-        <p>确定要受理选中的 <strong>{selectedRowKeys.length}</strong> 条申请吗？</p>
-        {selectedIncompleteCount > 0 && (
-          <Alert
-            message={`其中 ${selectedIncompleteCount} 条申请材料不完整，建议先要求补正`}
-            type="warning"
-            showIcon
-            style={{ marginTop: 12 }}
-          />
-        )}
-      </div>
-    );
-
     Modal.confirm({
       title: '批量受理确认',
-      content: content as any,
-      okText: '确认受理',
+      content: `确定要受理选中的 ${selectedRowKeys.length} 条申请吗？`,
       onOk: async () => {
         setBatchLoading(true);
         try {
@@ -161,18 +143,6 @@ export default function BatchAcceptWorkbenchPage() {
     ];
   }, [matters]);
 
-  const materialCompletenessOptions = [
-    { value: '', label: '全部' },
-    { value: 'complete', label: '材料齐全' },
-    { value: 'incomplete', label: '缺少必填材料' },
-  ];
-
-  const selectedIncompleteCount = useMemo(() => {
-    return applications.filter(app => 
-      selectedRowKeys.includes(app.id) && !app.materialCompleteness?.isComplete
-    ).length;
-  }, [selectedRowKeys, applications]);
-
   const columns = [
     {
       title: '事项名称',
@@ -192,44 +162,6 @@ export default function BatchAcceptWorkbenchPage() {
       dataIndex: 'applicantName',
       key: 'applicantName',
       width: 100,
-    },
-    {
-      title: '材料完整度',
-      dataIndex: 'materialCompleteness',
-      key: 'materialCompleteness',
-      width: 130,
-      render: (_: any, record: Application) => {
-        const mc = record.materialCompleteness;
-        if (!mc) return <span style={{ color: '#999' }}>-</span>;
-        
-        const { isComplete, completedRequired, totalRequired } = mc;
-        
-        if (totalRequired === 0) {
-          return (
-            <Tag color="default">
-              无必填材料
-            </Tag>
-          );
-        }
-        
-        if (isComplete) {
-          return (
-            <Tooltip title={`必填材料 ${completedRequired}/${totalRequired} 项已齐全`}>
-              <Tag icon={<CheckCircleOutlined />} color="success">
-                材料齐全 ({completedRequired}/{totalRequired})
-              </Tag>
-            </Tooltip>
-          );
-        }
-        
-        return (
-          <Tooltip title={`缺少 ${mc.missingMaterials.length} 项必填材料：${mc.missingMaterials.join('、')}`}>
-            <Tag icon={<CloseCircleOutlined />} color="error">
-              材料不齐 ({completedRequired}/{totalRequired})
-            </Tag>
-          </Tooltip>
-        );
-      },
     },
     {
       title: '材料数量',
@@ -346,13 +278,6 @@ export default function BatchAcceptWorkbenchPage() {
             style={{ width: 200 }}
             placeholder="选择事项"
           />
-          <Select
-            value={materialCompletenessFilter}
-            onChange={setMaterialCompletenessFilter}
-            options={materialCompletenessOptions}
-            style={{ width: 160 }}
-            placeholder="材料完整度"
-          />
           <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
             搜索
           </Button>
@@ -364,17 +289,8 @@ export default function BatchAcceptWorkbenchPage() {
 
       {selectedRowKeys.length > 0 && (
         <Alert
-          message={
-            <Space>
-              <span>已选择 {selectedRowKeys.length} 条待受理申请</span>
-              {selectedIncompleteCount > 0 && (
-                <Tag color="error" icon={<ExclamationOutlined />}>
-                  其中 {selectedIncompleteCount} 条材料不完整
-                </Tag>
-              )}
-            </Space>
-          }
-          type={selectedIncompleteCount > 0 ? 'warning' : 'info'}
+          message={`已选择 ${selectedRowKeys.length} 条待受理申请`}
+          type="info"
           showIcon
           style={{ marginBottom: 16 }}
           action={
@@ -484,16 +400,7 @@ export default function BatchAcceptWorkbenchPage() {
       >
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Alert
-            message={
-              <Space>
-                <span>将对选中的 {selectedRowKeys.length} 条申请发送补正通知</span>
-                {selectedIncompleteCount > 0 && (
-                  <Tag color="error">
-                    其中 {selectedIncompleteCount} 条材料不完整
-                  </Tag>
-                )}
-              </Space>
-            }
+            message={`将对选中的 ${selectedRowKeys.length} 条申请发送补正通知`}
             type="warning"
             showIcon
           />

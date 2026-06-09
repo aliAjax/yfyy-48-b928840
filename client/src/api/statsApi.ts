@@ -12,7 +12,6 @@ import {
   MonthlyTrendItem,
   SupplementStats,
   FullStatsOverview,
-  SupplementAnalysisData,
 } from '../types';
 
 export function getStatsOverview(params?: StatsFilterParams): Promise<ApiResponse<StatsOverview>> {
@@ -57,8 +56,4 @@ export function getSupplementStats(params?: StatsFilterParams): Promise<ApiRespo
 
 export function getDepartmentList(): Promise<ApiResponse<string[]>> {
   return request.get('/stats/departments');
-}
-
-export function getSupplementAnalysis(params?: StatsFilterParams): Promise<ApiResponse<SupplementAnalysisData>> {
-  return request.get('/stats/supplement-analysis', { params });
 }

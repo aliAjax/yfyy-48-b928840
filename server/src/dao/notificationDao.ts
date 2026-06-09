@@ -65,7 +65,6 @@ export function getUnreadCount(userId: string): number {
 export function listNotifications(params: {
   userId: string;
   isRead?: boolean;
-  types?: string[];
   page?: number;
   pageSize?: number;
 }): { notifications: Notification[]; total: number } {
@@ -75,12 +74,6 @@ export function listNotifications(params: {
   if (params.isRead !== undefined) {
     whereClauses.push('is_read = ?');
     paramsArr.push(params.isRead ? 1 : 0);
-  }
-
-  if (params.types && params.types.length > 0) {
-    const placeholders = params.types.map(() => '?').join(', ');
-    whereClauses.push(`type IN (${placeholders})`);
-    paramsArr.push(...params.types);
   }
 
   const whereStr = whereClauses.join(' AND ');
@@ -105,19 +98,9 @@ export function markAsRead(id: string, userId: string): boolean {
   return result.changes > 0;
 }
 
-export function markAllAsRead(userId: string, types?: string[]): number {
-  const whereClauses: string[] = ['user_id = ?', 'is_read = 0'];
-  const paramsArr: any[] = [userId];
-
-  if (types && types.length > 0) {
-    const placeholders = types.map(() => '?').join(', ');
-    whereClauses.push(`type IN (${placeholders})`);
-    paramsArr.push(...types);
-  }
-
-  const whereStr = whereClauses.join(' AND ');
+export function markAllAsRead(userId: string): number {
   const result = db.prepare(
-    `UPDATE notifications SET is_read = 1, read_at = ? WHERE ${whereStr}`
-  ).run(now(), ...paramsArr);
+    'UPDATE notifications SET is_read = 1, read_at = ? WHERE user_id = ? AND is_read = 0'
+  ).run(now(), userId);
   return result.changes;
 }

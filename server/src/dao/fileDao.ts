@@ -1,22 +1,7 @@
 import db from '../database';
-import { MaterialFile, FileVersionCompareResult, FileVersionDiffField } from '../types';
+import { MaterialFile } from '../types';
 import { generateId, now } from '../utils/helpers';
 import { findUserById } from './userDao';
-
-const TEXT_MIME_TYPES = [
-  'text/plain',
-  'text/html',
-  'text/css',
-  'text/javascript',
-  'application/json',
-  'application/xml',
-  'text/xml',
-  'text/csv',
-  'text/markdown',
-  'application/x-sh',
-  'application/x-yaml',
-  'text/yaml',
-];
 
 interface RawFile {
   id: string;
@@ -195,52 +180,4 @@ export function canDeleteFile(fileId: string, userId: string, userRole: string, 
   }
 
   return { canDelete: true };
-}
-
-function isTextFile(mimeType?: string): boolean {
-  if (!mimeType) return false;
-  if (TEXT_MIME_TYPES.includes(mimeType)) return true;
-  if (mimeType.startsWith('text/')) return true;
-  return false;
-}
-
-export function compareFileVersions(file1Id: string, file2Id: string): FileVersionCompareResult | null {
-  const file1 = findFileById(file1Id);
-  const file2 = findFileById(file2Id);
-
-  if (!file1 || !file2) return null;
-
-  if (file1.applicationId !== file2.applicationId) return null;
-  if (file1.originalName !== file2.originalName) return null;
-
-  const fields: Array<{ key: keyof MaterialFile; label: string }> = [
-    { key: 'createdAt', label: '上传时间' },
-    { key: 'uploadedByName', label: '上传人' },
-    { key: 'versionNote', label: '版本说明' },
-    { key: 'fileSize', label: '文件大小' },
-    { key: 'isCurrent', label: '当前版本标记' },
-  ];
-
-  const diffs: FileVersionDiffField[] = fields.map(({ key, label }) => {
-    const oldValue = file1[key];
-    const newValue = file2[key];
-    return {
-      field: key,
-      label,
-      oldValue,
-      newValue,
-      changed: oldValue !== newValue,
-    };
-  });
-
-  const hasDifferences = diffs.some(d => d.changed);
-  const textFile = isTextFile(file1.mimeType) && isTextFile(file2.mimeType);
-
-  return {
-    file1,
-    file2,
-    isTextFile: textFile,
-    diffs,
-    hasDifferences,
-  };
 }

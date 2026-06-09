@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Tag, Tabs, Checkbox } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { listMatters, createMatter, updateMatter, deleteMatter, getMatter } from '../api/matterApi';
-import { Matter, FlowStep } from '../types';
-import { safeJSONParse, validateFlowConfig, FlowValidationResult } from '../utils/common';
+import { Matter } from '../types';
+import { safeJSONParse } from '../utils/common';
 import FlowConfigurator from '../components/FlowConfigurator';
 
 const { TextArea } = Input;
@@ -19,7 +19,6 @@ export default function MatterManagePage() {
   const [form] = Form.useForm();
   const [materialsText, setMaterialsText] = useState('');
   const [flowText, setFlowText] = useState('');
-  const [flowValidation, setFlowValidation] = useState<FlowValidationResult | null>(null);
 
   useEffect(() => {
     loadMatters();
@@ -102,66 +101,6 @@ export default function MatterManagePage() {
       } catch {
         message.error('所需材料JSON格式错误');
         return;
-      }
-
-      let flowSteps: FlowStep[] = [];
-      try {
-        flowSteps = JSON.parse(flowText);
-      } catch {
-        message.error('流程配置JSON格式错误');
-        return;
-      }
-
-      const validation = validateFlowConfig(flowSteps);
-      if (!validation.valid) {
-        Modal.error({
-          title: '流程配置校验失败',
-          content: (
-            <div>
-              <p>请修正以下错误后再保存：</p>
-              <ul style={{ margin: 0, paddingLeft: 20 }}>
-                {validation.errors.map((err, idx) => (
-                  <li key={idx} style={{ color: '#ff4d4f', marginBottom: 4 }}>{err}</li>
-                ))}
-              </ul>
-              {validation.warnings.length > 0 && (
-                <>
-                  <p style={{ marginTop: 12 }}>同时有以下建议：</p>
-                  <ul style={{ margin: 0, paddingLeft: 20 }}>
-                    {validation.warnings.map((warn, idx) => (
-                      <li key={idx} style={{ color: '#faad14', marginBottom: 4 }}>{warn}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </div>
-          ),
-        });
-        return;
-      }
-
-      if (validation.warnings.length > 0) {
-        const confirmed = await new Promise<boolean>((resolve) => {
-          Modal.confirm({
-            title: '流程配置存在建议项',
-            content: (
-              <div>
-                <p>配置可以保存，但建议优化以下内容：</p>
-                <ul style={{ margin: 0, paddingLeft: 20 }}>
-                  {validation.warnings.map((warn, idx) => (
-                    <li key={idx}>{warn}</li>
-                  ))}
-                </ul>
-                <p style={{ marginTop: 12 }}>是否确认保存？</p>
-              </div>
-            ),
-            okText: '确认保存',
-            cancelText: '返回修改',
-            onOk: () => resolve(true),
-            onCancel: () => resolve(false),
-          });
-        });
-        if (!confirmed) return;
       }
 
       const data = {
@@ -398,7 +337,6 @@ export default function MatterManagePage() {
                     <FlowConfigurator
                       value={flowText}
                       onChange={(val) => setFlowText(val)}
-                      onValidationChange={(result) => setFlowValidation(result)}
                     />
                   ),
                 },

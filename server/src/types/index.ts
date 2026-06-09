@@ -78,7 +78,6 @@ export interface Application {
   submitTime?: string;
   acceptTime?: string;
   completeTime?: string;
-  flowSnapshot?: string;
   createdAt: string;
   updatedAt: string;
   warningStatus?: WarningStatus;
@@ -86,7 +85,6 @@ export interface Application {
   promiseDays?: number;
   matterWarningDays?: number;
   matterExcludeSupplementTime?: boolean;
-  flowSteps?: FlowStep[];
 }
 
 export interface MaterialFile {
@@ -291,64 +289,4 @@ export interface FullStatsOverview extends StatsOverview {
   supplementRate: number;
   warningRate: number;
   overdueRate: number;
-}
-
-export interface FileVersionDiffField {
-  field: string;
-  label: string;
-  oldValue: string | number | boolean | undefined;
-  newValue: string | number | boolean | undefined;
-  changed: boolean;
-}
-
-export interface FileVersionCompareResult {
-  file1: MaterialFile;
-  file2: MaterialFile;
-  isTextFile: boolean;
-  diffs: FileVersionDiffField[];
-  hasDifferences: boolean;
-}
-
-export interface SupplementReasonItem {
-  reason: string;
-  count: number;
-  applicationIds: string[];
-}
-
-export interface SupplementMatterItem {
-  matterId: string;
-  matterName: string;
-  department: string;
-  supplementCount: number;
-  applicationIds: string[];
-}
-
-export interface SupplementMaterialItem {
-  materialName: string;
-  problemCount: number;
-  applicationIds: string[];
-}
-
-export interface SupplementRepeatItem {
-  applicationId: string;
-  applicationNo: string;
-  matterName: string;
-  applicantName: string;
-  supplementCount: number;
-  reasons: string[];
-}
-
-export interface SupplementAnalysisOverview {
-  totalSupplementCount: number;
-  totalApplicationsWithSupplement: number;
-  avgSupplementPerApplication: number;
-  maxSupplementCount: number;
-}
-
-export interface SupplementAnalysisData {
-  overview: SupplementAnalysisOverview;
-  topReasons: SupplementReasonItem[];
-  topMatters: SupplementMatterItem[];
-  topMaterials: SupplementMaterialItem[];
-  repeatedSupplements: SupplementRepeatItem[];
 }

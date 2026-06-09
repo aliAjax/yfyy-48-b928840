@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Card, Button, Input, Select, Space, List, Modal, Form, message, Tag, Alert, Steps, Tooltip, Divider } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, UpOutlined, DownOutlined, SettingOutlined, EyeOutlined, CheckCircleOutlined, WarningOutlined } from '@ant-design/icons';
+import { useState, useEffect } from 'react';
+import { Card, Button, Input, Select, Space, List, Modal, Form, message, Tag } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, UpOutlined, DownOutlined, SettingOutlined } from '@ant-design/icons';
 import { FlowStep, UserRole, ApplicationStatus } from '../types';
-import { roleLabels, statusLabels, validateFlowConfig, FlowValidationResult } from '../utils/common';
+import { roleLabels, statusLabels } from '../utils/common';
 
 const { TextArea } = Input;
 
@@ -10,7 +10,6 @@ interface FlowConfiguratorProps {
   value?: string;
   onChange?: (value: string) => void;
   disabled?: boolean;
-  onValidationChange?: (result: FlowValidationResult) => void;
 }
 
 const statusOptions: { value: ApplicationStatus; label: string }[] = [
@@ -27,19 +26,12 @@ const roleOptions: { value: UserRole; label: string }[] = [
   { value: 'admin', label: '管理员' },
 ];
 
-export default function FlowConfigurator({ value, onChange, disabled = false, onValidationChange }: FlowConfiguratorProps) {
+export default function FlowConfigurator({ value, onChange, disabled = false }: FlowConfiguratorProps) {
   const [steps, setSteps] = useState<FlowStep[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
-  const [previewVisible, setPreviewVisible] = useState(false);
   const [editingStep, setEditingStep] = useState<FlowStep | null>(null);
   const [editingIndex, setEditingIndex] = useState<number>(-1);
   const [form] = Form.useForm();
-
-  const validation = useMemo(() => validateFlowConfig(steps), [steps]);
-
-  useEffect(() => {
-    onValidationChange?.(validation);
-  }, [validation, onValidationChange]);
 
   useEffect(() => {
     if (value) {
@@ -164,156 +156,6 @@ export default function FlowConfigurator({ value, onChange, disabled = false, on
     }
   };
 
-  const renderValidationTips = () => {
-    if (validation.errors.length === 0 && validation.warnings.length === 0) {
-      return (
-        <Alert
-          icon={<CheckCircleOutlined />}
-          message="流程配置校验通过"
-          type="success"
-          showIcon
-          style={{ marginBottom: 12 }}
-        />
-      );
-    }
-    return (
-      <Space direction="vertical" style={{ width: '100%', marginBottom: 12 }}>
-        {validation.errors.length > 0 && (
-          <Alert
-            message="配置错误"
-            description={
-              <ul style={{ margin: 0, paddingLeft: 20 }}>
-                {validation.errors.map((err, idx) => (
-                  <li key={idx}>{err}</li>
-                ))}
-              </ul>
-            }
-            type="error"
-            showIcon
-          />
-        )}
-        {validation.warnings.length > 0 && (
-          <Alert
-            message="配置建议"
-            description={
-              <ul style={{ margin: 0, paddingLeft: 20 }}>
-                {validation.warnings.map((warn, idx) => (
-                  <li key={idx}>{warn}</li>
-                ))}
-              </ul>
-            }
-            type="warning"
-            showIcon
-          />
-        )}
-      </Space>
-    );
-  };
-
-  const renderPreviewModal = () => (
-    <Modal
-      title="流程预览"
-      open={previewVisible}
-      onCancel={() => setPreviewVisible(false)}
-      footer={[
-        <Button key="close" onClick={() => setPreviewVisible(false)}>关闭</Button>,
-      ]}
-      width={700}
-    >
-      <div style={{ marginBottom: 16 }}>
-        <Divider orientation="left" plain style={{ marginBottom: 12 }}>
-          <Space>
-            <EyeOutlined />
-            <span>流程步骤概览</span>
-          </Space>
-        </Divider>
-        <Steps
-          direction="vertical"
-          size="small"
-          current={-1}
-          items={steps.map((step) => ({
-            title: (
-              <Space>
-                <strong>{step.name}</strong>
-                <Tag color={getStatusColor(step.status)}>
-                  {step.status ? statusLabels[step.status] : '未设置状态'}
-                </Tag>
-              </Space>
-            ),
-            description: (
-              <Space direction="vertical" size={4} style={{ marginTop: 4 }}>
-                <Space size={8}>
-                  <Tag color={getRoleColor(step.role)}>
-                    操作角色：{roleLabels[step.role]}
-                  </Tag>
-                </Space>
-                {step.description && (
-                  <span style={{ color: '#666', fontSize: 12 }}>
-                    {step.description}
-                  </span>
-                )}
-              </Space>
-            ),
-            status: 'process' as const,
-          }))}
-        />
-      </div>
-
-      <div>
-        <Divider orientation="left" plain style={{ marginBottom: 12 }}>
-          <Space>
-            <WarningOutlined />
-            <span>流程流转说明</span>
-          </Space>
-        </Divider>
-        <div style={{ background: '#fafafa', padding: 16, borderRadius: 6, border: '1px solid #e8e8e8' }}>
-          <List
-            size="small"
-            dataSource={steps}
-            renderItem={(item, index) => (
-              <List.Item>
-                <List.Item.Meta
-                  avatar={
-                    <div style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: '50%',
-                      background: '#1890ff',
-                      color: '#fff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 'bold',
-                      fontSize: 12,
-                    }}>
-                      {index + 1}
-                    </div>
-                  }
-                  title={
-                    <Space>
-                      <span>{item.name}</span>
-                      {index < steps.length - 1 && (
-                        <span style={{ color: '#bfbfbf' }}>→</span>
-                      )}
-                    </Space>
-                  }
-                  description={
-                    <Tooltip title={`由【${roleLabels[item.role]}】操作`}>
-                      <span style={{ fontSize: 12, color: '#8c8c8c' }}>
-                        由 <Tag color={getRoleColor(item.role)} style={{ margin: 0 }}>{roleLabels[item.role]}</Tag> 操作
-                        {item.status && `，对应状态：${statusLabels[item.status]}`}
-                      </span>
-                    </Tooltip>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        </div>
-      </div>
-    </Modal>
-  );
-
   return (
     <Card
       title={
@@ -323,25 +165,14 @@ export default function FlowConfigurator({ value, onChange, disabled = false, on
         </Space>
       }
       extra={
-        <Space>
-          <Button
-            icon={<EyeOutlined />}
-            onClick={() => setPreviewVisible(true)}
-            disabled={steps.length === 0}
-          >
-            流程预览
+        !disabled && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+            添加步骤
           </Button>
-          {!disabled && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-              添加步骤
-            </Button>
-          )}
-        </Space>
+        )
       }
       size="small"
     >
-      {renderValidationTips()}
-
       <List
         dataSource={steps}
         renderItem={(item, index) => (
@@ -485,8 +316,6 @@ export default function FlowConfigurator({ value, onChange, disabled = false, on
           </Form.Item>
         </Form>
       </Modal>
-
-      {renderPreviewModal()}
     </Card>
   );
 }

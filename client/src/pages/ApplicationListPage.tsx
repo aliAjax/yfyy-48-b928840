@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Table, Card, Input, Select, Button, Space, Tag, Modal, message, Typography } from 'antd';
+import { Table, Card, Input, Select, Button, Space, Tag, Modal, message } from 'antd';
 import { SearchOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { listApplications, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication } from '../api/applicationApi';
-import { listUsers } from '../api/userApi';
-import { Application, ApplicationStatus, WarningStatus, User } from '../types';
+import { Application, ApplicationStatus, WarningStatus } from '../types';
 import { statusLabels, statusColors, roleLabels, warningLabels, warningColors, canOperateStep } from '../utils/common';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import dayjs from 'dayjs';
-
-const { Text } = Typography;
 
 interface ApplicationListPageProps {
   showAll?: boolean;
@@ -17,10 +14,6 @@ interface ApplicationListPageProps {
 }
 
 export default function ApplicationListPage({ showAll = false, reviewMode = false }: ApplicationListPageProps) {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation() as any;
-
   const [applications, setApplications] = useState<Application[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -28,70 +21,39 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
-  const [warningFilter, setWarningFilter] = useState<string>((location.state?.warningFilter as string) || '');
-  const [operatorFilter, setOperatorFilter] = useState<string>('');
-  const [operatorUsers, setOperatorUsers] = useState<User[]>([]);
-  const [hasSupplementFilter, setHasSupplementFilter] = useState<boolean>(!!location.state?.hasSupplement);
-  const [supplementReasonFilter, setSupplementReasonFilter] = useState<string>((location.state?.supplementReason as string) || '');
-  const [applicationIdsFilter, setApplicationIdsFilter] = useState<string[]>(
-    (location.state?.applicationIds && Array.isArray(location.state.applicationIds)) ? location.state.applicationIds : []
-  );
-  const requestIdRef = useState({ current: 0 })[0];
+  const [warningFilter, setWarningFilter] = useState<string>('');
+  
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation() as any;
 
   const canFilterByWarning = user?.role === 'window' || user?.role === 'admin';
-  const canFilterByOperator = user?.role === 'window' || user?.role === 'admin';
 
   useEffect(() => {
-    if (canFilterByOperator) {
-      loadOperatorUsers();
+    if (location.state?.warningFilter) {
+      setWarningFilter(location.state.warningFilter);
     }
-  }, [canFilterByOperator]);
-
-  const loadOperatorUsers = async () => {
-    try {
-      const [windowRes, reviewerRes] = await Promise.all([
-        listUsers({ role: 'window' }),
-        listUsers({ role: 'reviewer' }),
-      ]);
-      const users = [
-        ...(windowRes.data || []),
-        ...(reviewerRes.data || []),
-      ];
-      setOperatorUsers(users);
-    } catch {}
-  };
+  }, []);
 
   useEffect(() => {
     loadApplications();
-  }, [page, pageSize, keyword, statusFilter, warningFilter, operatorFilter, hasSupplementFilter, supplementReasonFilter, applicationIdsFilter]);
+  }, [page, pageSize, keyword, statusFilter, warningFilter]);
 
   const loadApplications = async () => {
-    const myRequestId = ++requestIdRef.current;
     setLoading(true);
     try {
       const params: any = { page, pageSize };
       if (keyword) params.keyword = keyword;
       if (statusFilter) params.status = statusFilter;
       if (warningFilter && canFilterByWarning) params.warningStatus = warningFilter;
-      if (operatorFilter && canFilterByOperator) params.operatorUserId = operatorFilter;
-      if (applicationIdsFilter.length > 0) {
-        params.applicationIds = applicationIdsFilter;
-      } else {
-        if (hasSupplementFilter) params.hasSupplement = true;
-        if (supplementReasonFilter) params.supplementReason = supplementReasonFilter;
-      }
-      if (location.state?.matterId) params.matterId = location.state.matterId;
 
       const res = await listApplications(params);
-      if (myRequestId !== requestIdRef.current) return;
       if (res.success) {
         setApplications(res.data || []);
         setTotal(res.total || 0);
       }
     } finally {
-      if (myRequestId === requestIdRef.current) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   };
 
@@ -104,10 +66,6 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
     setKeyword('');
     setStatusFilter('');
     setWarningFilter('');
-    setOperatorFilter('');
-    setHasSupplementFilter(false);
-    setSupplementReasonFilter('');
-    setApplicationIdsFilter([]);
     setPage(1);
   };
 
@@ -346,40 +304,6 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
     { value: 'overdue', label: '已超期' },
   ];
 
-  const activeFilterTags = () => {
-    const tags: JSX.Element[] = [];
-    if (hasSupplementFilter) {
-      tags.push(
-        <Tag key="hasSupplement" color="warning" closable onClose={() => setHasSupplementFilter(false)}>
-          仅显示有补正记录
-        </Tag>
-      );
-    }
-    if (supplementReasonFilter) {
-      tags.push(
-        <Tag key="supplementReason" color="orange" closable onClose={() => setSupplementReasonFilter('')}>
-          补正原因：{supplementReasonFilter}
-        </Tag>
-      );
-    }
-    if (applicationIdsFilter.length > 0) {
-      tags.push(
-        <Tag key="applicationIds" color="purple" closable onClose={() => setApplicationIdsFilter([])}>
-          相关申请 ({applicationIdsFilter.length}条)
-        </Tag>
-      );
-    }
-    if (location.state?.matterId) {
-      const matterName = location.state?.matterName || location.state.matterId;
-      tags.push(
-        <Tag key="matterId" color="blue" closable onClose={() => { navigate('/applications', { replace: true, state: {} }); window.location.reload(); }}>
-          事项：{matterName}
-        </Tag>
-      );
-    }
-    return tags;
-  };
-
   return (
     <Card
       title={reviewMode ? '待审核申请' : showAll ? '申请管理' : '我的申请'}
@@ -407,34 +331,12 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
               style={{ width: 140 }}
             />
           )}
-          {canFilterByOperator && (
-            <Select
-              placeholder="经办人/审核人"
-              value={operatorFilter}
-              onChange={setOperatorFilter}
-              options={[
-                { value: '', label: '全部经办人' },
-                ...operatorUsers.map(u => ({ value: u.id, label: u.name })),
-              ]}
-              style={{ width: 160 }}
-              showSearch
-              optionFilterProp="label"
-            />
-          )}
           <Button icon={<ReloadOutlined />} onClick={handleReset}>
             重置
           </Button>
         </Space>
       }
     >
-      {(hasSupplementFilter || supplementReasonFilter || applicationIdsFilter.length > 0 || location.state?.matterId) && (
-        <div style={{ marginBottom: 12 }}>
-          <Space>
-            <Text type="secondary" style={{ fontSize: 13 }}>当前筛选：</Text>
-            {activeFilterTags()}
-          </Space>
-        </div>
-      )}
       <Table
         rowKey="id"
         loading={loading}

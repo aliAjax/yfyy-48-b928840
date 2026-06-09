@@ -1,5 +1,5 @@
 import request from '../utils/request';
-import { MaterialFile, ApiResponse, FileVersionCompareResult } from '../types';
+import { MaterialFile, ApiResponse } from '../types';
 
 export function uploadFile(applicationId: string, file: File, onProgress?: (percent: number) => void): Promise<ApiResponse<MaterialFile>> {
   const formData = new FormData();
@@ -38,10 +38,4 @@ export function getDownloadUrl(fileId: string): string {
 
 export function deleteFile(id: string): Promise<ApiResponse> {
   return request.delete(`/files/${id}`);
-}
-
-export function compareFileVersions(applicationId: string, file1Id: string, file2Id: string): Promise<ApiResponse<FileVersionCompareResult>> {
-  return request.get(`/files/compare/${applicationId}`, {
-    params: { file1Id, file2Id },
-  });
 }

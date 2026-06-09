@@ -74,13 +74,6 @@ export interface MaterialFile {
   createdAt: string;
 }
 
-export interface MaterialCompletenessInfo {
-  totalRequired: number;
-  completedRequired: number;
-  isComplete: boolean;
-  missingMaterials: string[];
-}
-
 export interface Application {
   id: string;
   applicationNo: string;
@@ -100,7 +93,6 @@ export interface Application {
   submitTime?: string;
   acceptTime?: string;
   completeTime?: string;
-  flowSnapshot?: string;
   createdAt: string;
   updatedAt: string;
   files?: MaterialFile[];
@@ -111,7 +103,6 @@ export interface Application {
   matterWarningDays?: number;
   matterExcludeSupplementTime?: boolean;
   flowSteps?: FlowStep[];
-  materialCompleteness?: MaterialCompletenessInfo;
 }
 
 export interface OperationLog {
@@ -304,64 +295,4 @@ export interface ReviewOpinionFormData {
   materialName: string;
   status: ReviewOpinionStatus;
   opinion: string;
-}
-
-export interface FileVersionDiffField {
-  field: string;
-  label: string;
-  oldValue: string | number | boolean | undefined;
-  newValue: string | number | boolean | undefined;
-  changed: boolean;
-}
-
-export interface FileVersionCompareResult {
-  file1: MaterialFile;
-  file2: MaterialFile;
-  isTextFile: boolean;
-  diffs: FileVersionDiffField[];
-  hasDifferences: boolean;
-}
-
-export interface SupplementReasonItem {
-  reason: string;
-  count: number;
-  applicationIds: string[];
-}
-
-export interface SupplementMatterItem {
-  matterId: string;
-  matterName: string;
-  department: string;
-  supplementCount: number;
-  applicationIds: string[];
-}
-
-export interface SupplementMaterialItem {
-  materialName: string;
-  problemCount: number;
-  applicationIds: string[];
-}
-
-export interface SupplementRepeatItem {
-  applicationId: string;
-  applicationNo: string;
-  matterName: string;
-  applicantName: string;
-  supplementCount: number;
-  reasons: string[];
-}
-
-export interface SupplementAnalysisOverview {
-  totalSupplementCount: number;
-  totalApplicationsWithSupplement: number;
-  avgSupplementPerApplication: number;
-  maxSupplementCount: number;
-}
-
-export interface SupplementAnalysisData {
-  overview: SupplementAnalysisOverview;
-  topReasons: SupplementReasonItem[];
-  topMatters: SupplementMatterItem[];
-  topMaterials: SupplementMaterialItem[];
-  repeatedSupplements: SupplementRepeatItem[];
 }

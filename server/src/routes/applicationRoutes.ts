@@ -7,7 +7,7 @@ import { listCurrentFilesByApplication } from '../dao/fileDao';
 import { createNotification } from '../dao/notificationDao';
 import { listReviewOpinionsByApplication, batchCreateReviewOpinions, getMaxReviewRound } from '../dao/reviewOpinionDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
-import { now, toJSON, calculateWarningStatus, calculateSupplementDays, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep, calculateMaterialCompleteness } from '../utils/helpers';
+import { now, toJSON, calculateWarningStatus, calculateSupplementDays, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep } from '../utils/helpers';
 import { ApplicationStatus, WarningStatus, ReviewOpinionStatus } from '../types';
 
 const router = Router();
@@ -30,28 +30,11 @@ function enrichApplication(app: any) {
     supplementDays
   );
   
-  let flowSnapshot = app.flowSnapshot;
-  let flowSteps;
-  if (flowSnapshot) {
-    flowSteps = parseFlowConfig(flowSnapshot);
-  } else {
-    flowSteps = parseFlowConfig(matter?.flowConfig);
-    if (matter?.flowConfig) {
-      flowSnapshot = matter.flowConfig;
-      updateApplication(app.id, { flowSnapshot });
-    }
-  }
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
   const currentStepName = app.currentStep || getCurrentStepName(flowSteps, app.status);
-  
-  const materialCompleteness = calculateMaterialCompleteness(
-    matter?.requiredMaterials,
-    app.materials,
-    files
-  );
   
   return {
     ...app,
-    flowSnapshot,
     matterName: matter?.name,
     applicantName: applicant?.name,
     files,
@@ -63,18 +46,12 @@ function enrichApplication(app: any) {
     matterExcludeSupplementTime: matter?.excludeSupplementTime,
     flowSteps,
     currentStep: currentStepName,
-    materialCompleteness,
   };
 }
 
 function getApplicationFlow(app: any) {
   const matter = findMatterById(app.matterId);
-  let flowSteps;
-  if (app.flowSnapshot) {
-    flowSteps = parseFlowConfig(app.flowSnapshot);
-  } else {
-    flowSteps = parseFlowConfig(matter?.flowConfig);
-  }
+  const flowSteps = parseFlowConfig(matter?.flowConfig);
   return { matter, flowSteps };
 }
 
@@ -118,18 +95,11 @@ function notifyStepUsers(
 router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
   
-  const { status, keyword, page = 1, pageSize = 10, matterId, warningStatus, operatorUserId, materialCompleteness, hasSupplement, supplementReason, applicationIds } = req.query;
+  const { status, keyword, page = 1, pageSize = 10, matterId, warningStatus } = req.query;
   
   let applicantId: string | undefined;
   if (req.user.role === 'applicant') {
     applicantId = req.user.id;
-  }
-
-  const canFilterByOperator = req.user.role === 'window' || req.user.role === 'admin';
-
-  let applicationIdsArr: string[] | undefined;
-  if (applicationIds && typeof applicationIds === 'string') {
-    applicationIdsArr = applicationIds.split(',').filter(id => id.trim());
   }
 
   const result = listApplications({
@@ -137,10 +107,6 @@ router.get('/', authMiddleware, (req: AuthRequest, res) => {
     matterId: matterId as string,
     status: status as ApplicationStatus,
     keyword: keyword as string,
-    operatorUserId: canFilterByOperator && operatorUserId ? (operatorUserId as string) : undefined,
-    hasSupplement: hasSupplement === 'true',
-    supplementReason: supplementReason as string,
-    applicationIds: applicationIdsArr,
   });
 
   let enriched = result.applications.map(enrichApplication);
@@ -150,15 +116,6 @@ router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (warningStatus && canFilterByWarning) {
     const ws = warningStatus as WarningStatus;
     enriched = enriched.filter(app => app.warningStatus === ws);
-  }
-
-  if (materialCompleteness) {
-    const mc = materialCompleteness as string;
-    if (mc === 'complete') {
-      enriched = enriched.filter(app => app.materialCompleteness?.isComplete);
-    } else if (mc === 'incomplete') {
-      enriched = enriched.filter(app => !app.materialCompleteness?.isComplete);
-    }
   }
 
   const total = enriched.length;
@@ -177,19 +134,16 @@ router.get('/', authMiddleware, (req: AuthRequest, res) => {
 router.get('/warning/list', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 
-  const { warningStatus, page = 1, pageSize = 10, keyword, operatorUserId } = req.query;
+  const { warningStatus, page = 1, pageSize = 10, keyword } = req.query;
 
   let applicantId: string | undefined;
   if (req.user.role === 'applicant') {
     applicantId = req.user.id;
   }
 
-  const canFilterByOperator = req.user.role === 'window' || req.user.role === 'admin';
-
   const result = listApplications({
     applicantId,
     keyword: keyword as string,
-    operatorUserId: canFilterByOperator && operatorUserId ? (operatorUserId as string) : undefined,
   });
 
   let enriched = result.applications.map(enrichApplication);
@@ -415,18 +369,13 @@ router.post('/batch/supplement', authMiddleware, (req: AuthRequest, res) => {
 router.get('/warning/stats', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 
-  const { operatorUserId } = req.query;
-
   let applicantId: string | undefined;
   if (req.user.role === 'applicant') {
     applicantId = req.user.id;
   }
 
-  const canFilterByOperator = req.user.role === 'window' || req.user.role === 'admin';
-
   const result = listApplications({
     applicantId,
-    operatorUserId: canFilterByOperator && operatorUserId ? (operatorUserId as string) : undefined,
   });
 
   const enriched = result.applications.map(enrichApplication);
@@ -479,8 +428,6 @@ router.post('/', authMiddleware, requireRole('applicant'), (req: AuthRequest, re
 
   const flowSteps = parseFlowConfig(matter.flowConfig);
   const initialStepName = getCurrentStepName(flowSteps, 'draft');
-  const flowSnapshot = matter.flowConfig;
-
   const app = createApplication({
     matterId,
     applicantId: req.user.id,
@@ -488,7 +435,6 @@ router.post('/', authMiddleware, requireRole('applicant'), (req: AuthRequest, re
     materials: materials ? toJSON(materials) : undefined,
     status: 'draft',
     currentStep: initialStepName,
-    flowSnapshot,
   });
 
   createLog({

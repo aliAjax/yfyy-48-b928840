@@ -19,17 +19,11 @@ router.get('/unread-count', authMiddleware, (req: AuthRequest, res) => {
 router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 
-  const { page = 1, pageSize = 10, isRead, type } = req.query;
-
-  let types: string[] | undefined;
-  if (type) {
-    types = Array.isArray(type) ? type.map(String) : String(type).split(',');
-  }
+  const { page = 1, pageSize = 10, isRead } = req.query;
 
   const result = listNotifications({
     userId: req.user.id,
     isRead: isRead !== undefined ? isRead === 'true' : undefined,
-    types,
     page: Number(page),
     pageSize: Number(pageSize),
   });
@@ -55,14 +49,7 @@ router.put('/:id/read', authMiddleware, (req: AuthRequest, res) => {
 router.put('/read-all', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
 
-  const { type } = req.body || {};
-
-  let types: string[] | undefined;
-  if (type) {
-    types = Array.isArray(type) ? type.map(String) : String(type).split(',');
-  }
-
-  const count = markAllAsRead(req.user.id, types);
+  const count = markAllAsRead(req.user.id);
   res.json({ success: true, data: { count }, message: `已标记 ${count} 条为已读` });
 });
 
