@@ -2,12 +2,15 @@ import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
+const isTest = process.env.NODE_ENV === 'test';
+
 const dbDir = path.join(__dirname, '../../data');
-if (!fs.existsSync(dbDir)) {
+const dbPath = isTest ? ':memory:' : path.join(dbDir, 'approval.db');
+
+if (!isTest && !fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-const dbPath = path.join(dbDir, 'approval.db');
 const db: DatabaseType = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
