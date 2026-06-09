@@ -1,5 +1,5 @@
 import request from '../utils/request';
-import { Application, ApiResponse, ApplicationStatus, WarningStatus, BatchOperationResult, ReviewOpinion, ReviewOpinionFormData } from '../types';
+import { Application, ApiResponse, ApplicationStatus, WarningStatus, BatchOperationResult, ReviewOpinion, ReviewOpinionFormData, ReviewResult } from '../types';
 
 export function listApplications(params?: {
   status?: ApplicationStatus;
@@ -52,7 +52,7 @@ export function sendReviewApplication(id: string): Promise<ApiResponse<Applicati
 }
 
 export function reviewApplication(id: string, data: {
-  pass: boolean;
+  result: ReviewResult;
   opinion: string;
   reviewOpinions?: ReviewOpinionFormData[];
 }): Promise<ApiResponse<Application>> {

@@ -99,6 +99,7 @@ export interface Application {
   remainingDays?: number;
   promiseDays?: number;
   flowSteps?: FlowStep[];
+  supplementReviewContext?: SupplementReviewContext;
 }
 
 export interface OperationLog {
@@ -115,10 +116,12 @@ export interface OperationLog {
 
 export type NotificationType = 
   | 'submit' 
+  | 'resubmit'
   | 'accept' 
   | 'supplement' 
   | 'reject' 
   | 'review_pass'
+  | 'review_supplement'
   | 'review_reject'
   | 'send_review'
   | 'complete';
@@ -275,6 +278,8 @@ export interface FullStatsOverview extends StatsOverview {
 
 export type ReviewOpinionStatus = 'pass' | 'problem';
 
+export type ReviewResult = 'pass' | 'supplement' | 'reject';
+
 export interface ReviewOpinion {
   id: string;
   applicationId: string;
@@ -291,4 +296,25 @@ export interface ReviewOpinionFormData {
   materialName: string;
   status: ReviewOpinionStatus;
   opinion: string;
+}
+
+export interface SupplementReviewProblemItem {
+  materialName: string;
+  opinion: string;
+  reviewRound: number;
+  reviewedAt: string;
+  hasNewFileVersion: boolean;
+  latestFileVersion?: number;
+  latestFileTime?: string;
+  status: 'corrected' | 'pending';
+}
+
+export interface SupplementReviewContext {
+  isSupplementReview: boolean;
+  previousRound: number;
+  currentRound: number;
+  resubmitTime?: string;
+  problemItems: SupplementReviewProblemItem[];
+  correctedCount: number;
+  pendingCount: number;
 }

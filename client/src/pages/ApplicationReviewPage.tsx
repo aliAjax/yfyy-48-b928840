@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider, Steps, Tooltip, Modal, Table, Collapse, Empty } from 'antd';
-import { ArrowLeftOutlined, FileTextOutlined, UserOutlined, HistoryOutlined, DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SaveOutlined, CheckOutlined, CloseOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { Alert, Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider, Steps, Tooltip, Modal, Table, Collapse, Empty } from 'antd';
+import { ArrowLeftOutlined, FileTextOutlined, UserOutlined, HistoryOutlined, DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SaveOutlined, CheckOutlined, CloseOutlined, FolderOpenOutlined, RetweetOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, reviewApplication, getReviewOpinions, saveReviewOpinions } from '../api/applicationApi';
 import { Application, FlowStep, MaterialFile, ReviewOpinionFormData, ReviewOpinion, MatterMaterial } from '../types';
@@ -37,10 +37,10 @@ export default function ApplicationReviewPage() {
   }, [id]);
 
   useEffect(() => {
-    if (matter && reviewOpinions.length > 0 && !initialized) {
+    if (matter && !initialized && (reviewOpinions.length > 0 || application?.supplementReviewContext?.isSupplementReview)) {
       restoreFromLatestRound();
     }
-  }, [matter, reviewOpinions, initialized]);
+  }, [matter, reviewOpinions, initialized, application]);
 
   const loadApplication = async () => {
     setLoading(true);
@@ -70,9 +70,15 @@ export default function ApplicationReviewPage() {
   };
 
   const restoreFromLatestRound = () => {
-    if (reviewOpinions.length === 0) return;
-    const maxRound = Math.max(...reviewOpinions.map(o => o.reviewRound));
-    const latestOpinions = reviewOpinions.filter(o => o.reviewRound === maxRound);
+    const context = application?.supplementReviewContext;
+    const latestRound = context?.isSupplementReview
+      ? context.previousRound
+      : reviewOpinions.length > 0
+        ? Math.max(...reviewOpinions.map(o => o.reviewRound))
+        : 0;
+    const latestOpinions = latestRound > 0
+      ? reviewOpinions.filter(o => o.reviewRound === latestRound)
+      : [];
     
     const materials = safeJSONParse<MatterMaterial[]>(matter?.requiredMaterials, []);
     const data: ReviewOpinionFormData[] = materials.map(m => {
@@ -80,7 +86,7 @@ export default function ApplicationReviewPage() {
       return {
         materialName: m.name,
         status: existing?.status || 'pass',
-        opinion: existing?.opinion || '',
+        opinion: existing?.status === 'problem' ? existing.opinion : existing?.opinion || '',
       };
     });
     setFormData(data);
@@ -179,6 +185,18 @@ export default function ApplicationReviewPage() {
         return;
       }
 
+      if (values.result === 'supplement' && !hasProblem) {
+        Modal.confirm({
+          title: '确认继续补正？',
+          content: '当前材料均标记为通过，但您选择了"继续补正"。是否继续？',
+          okText: '继续补正',
+          okButtonProps: { danger: true },
+          cancelText: '返回修改',
+          onOk: () => doSubmit(values),
+        });
+        return;
+      }
+
       doSubmit(values);
     } catch (error) {
     }
@@ -188,7 +206,7 @@ export default function ApplicationReviewPage() {
     setSubmitting(true);
     try {
       const res = await reviewApplication(id!, {
-        pass: values.result === 'pass',
+        result: values.result,
         opinion: values.opinion || '',
         reviewOpinions: formData,
       });
@@ -272,6 +290,14 @@ export default function ApplicationReviewPage() {
 
   const passCount = formData.filter(item => item.status === 'pass').length;
   const problemCount = formData.filter(item => item.status === 'problem').length;
+  const supplementReviewContext = application?.supplementReviewContext;
+  const problemContextMap = useMemo(() => {
+    const map: Record<string, NonNullable<Application['supplementReviewContext']>['problemItems'][number]> = {};
+    supplementReviewContext?.problemItems.forEach(item => {
+      map[item.materialName] = item;
+    });
+    return map;
+  }, [supplementReviewContext]);
 
   const groupedOpinions = useMemo(() => {
     const groups: Record<number, ReviewOpinion[]> = {};
@@ -367,6 +393,24 @@ export default function ApplicationReviewPage() {
           </Descriptions.Item>
         </Descriptions>
       </Card>
+
+      {supplementReviewContext?.isSupplementReview && (
+        <Alert
+          type="warning"
+          showIcon
+          icon={<RetweetOutlined />}
+          style={{ marginBottom: 16 }}
+          message={
+            <Space wrap>
+              <span>补正后复审</span>
+              <Tag color="blue">上一轮：第 {supplementReviewContext.previousRound} 轮</Tag>
+              <Tag color="green">已补正 {supplementReviewContext.correctedCount} 项</Tag>
+              <Tag color="orange">未处理 {supplementReviewContext.pendingCount} 项</Tag>
+            </Space>
+          }
+          description="系统已保留上一轮问题项，并根据补正后上传的新材料版本标记处理状态。"
+        />
+      )}
 
       <Card title="申请信息" style={{ marginBottom: 16 }}>
         {Object.keys(basicInfo).length > 0 ? (
@@ -595,13 +639,18 @@ export default function ApplicationReviewPage() {
             {formData.map((item, idx) => {
               const materialFiles = getFilesForMaterial(item.materialName);
               const materialInfo = matterMaterials.find(m => m.name === item.materialName);
+              const problemContext = problemContextMap[item.materialName];
+              const isPendingProblem = problemContext?.status === 'pending';
               return (
                 <div
                   key={item.materialName}
                   style={{
                     padding: '20px',
                     borderBottom: idx < formData.length - 1 ? '1px solid #f0f0f0' : 'none',
-                    background: item.status === 'pass' ? '#f6ffed' : '#fff7e6',
+                    background: isPendingProblem ? '#fff1f0' : item.status === 'pass' ? '#f6ffed' : '#fff7e6',
+                    borderLeft: problemContext
+                      ? `4px solid ${problemContext.status === 'corrected' ? '#52c41a' : '#ff4d4f'}`
+                      : 'none',
                     transition: 'background 0.3s',
                   }}
                 >
@@ -634,7 +683,27 @@ export default function ApplicationReviewPage() {
                         <Tag color={item.status === 'pass' ? 'success' : 'warning'} style={{ marginLeft: 'auto' }}>
                           {item.status === 'pass' ? '材料合规' : '需修改'}
                         </Tag>
+                        {problemContext && (
+                          <Tag color={problemContext.status === 'corrected' ? 'success' : 'error'}>
+                            {problemContext.status === 'corrected' ? '已补正' : '仍未处理'}
+                          </Tag>
+                        )}
                       </div>
+
+                      {problemContext && (
+                        <div style={{ marginBottom: 12, padding: '10px 12px', background: 'rgba(255,255,255,0.78)', borderRadius: 6, border: '1px solid #ffd591' }}>
+                          <div style={{ color: '#8c5a00', fontSize: 13, marginBottom: 4 }}>
+                            上一轮问题：{problemContext.opinion || '无具体意见'}
+                          </div>
+                          <Space size={12} style={{ color: '#666', fontSize: 12 }}>
+                            <span>第 {problemContext.reviewRound} 轮</span>
+                            <span>{dayjs(problemContext.reviewedAt).format('YYYY-MM-DD HH:mm')}</span>
+                            {problemContext.latestFileVersion && (
+                              <span>当前材料 v{problemContext.latestFileVersion}</span>
+                            )}
+                          </Space>
+                        </div>
+                      )}
 
                       {materialInfo?.description && (
                         <div style={{ color: '#999', fontSize: 13, marginBottom: 12, padding: '8px 12px', background: 'rgba(0,0,0,0.02)', borderRadius: 4 }}>
@@ -783,9 +852,13 @@ export default function ApplicationReviewPage() {
                 <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} /> 
                 <span style={{ fontSize: 15, fontWeight: 500 }}>审核通过</span>
               </Radio>
+              <Radio value="supplement" style={{ padding: '8px 24px' }}>
+                <ExclamationCircleOutlined style={{ color: '#faad14', fontSize: 18 }} /> 
+                <span style={{ fontSize: 15, fontWeight: 500 }}>继续补正</span>
+              </Radio>
               <Radio value="reject" style={{ padding: '8px 24px' }}>
                 <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} /> 
-                <span style={{ fontSize: 15, fontWeight: 500 }}>审核不通过</span>
+                <span style={{ fontSize: 15, fontWeight: 500 }}>退回</span>
               </Radio>
             </Radio.Group>
           </Form.Item>

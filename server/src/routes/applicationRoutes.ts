@@ -3,12 +3,12 @@ import { findApplicationById, listApplications, createApplication, updateApplica
 import { findMatterById } from '../dao/matterDao';
 import { findUserById, listUsers } from '../dao/userDao';
 import { createLog, listLogsByApplication } from '../dao/logDao';
-import { listCurrentFilesByApplication } from '../dao/fileDao';
+import { listAllFilesByApplication, listCurrentFilesByApplication } from '../dao/fileDao';
 import { createNotification } from '../dao/notificationDao';
 import { listReviewOpinionsByApplication, batchCreateReviewOpinions, getMaxReviewRound } from '../dao/reviewOpinionDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
 import { now, toJSON, calculateWarningStatus, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep } from '../utils/helpers';
-import { ApplicationStatus, WarningStatus, ReviewOpinionStatus } from '../types';
+import { ApplicationStatus, WarningStatus, ReviewOpinionStatus, ReviewResult } from '../types';
 
 const router = Router();
 
@@ -17,6 +17,7 @@ function enrichApplication(app: any) {
   const applicant = findUserById(app.applicantId);
   const files = listCurrentFilesByApplication(app.id);
   const reviewOpinions = listReviewOpinionsByApplication(app.id);
+  const supplementReviewContext = buildSupplementReviewContext(app);
   
   const { warningStatus, remainingDays } = calculateWarningStatus(
     app.acceptTime,
@@ -38,6 +39,83 @@ function enrichApplication(app: any) {
     promiseDays: matter?.promiseDays,
     flowSteps,
     currentStep: currentStepName,
+    supplementReviewContext,
+  };
+}
+
+function findLatestSupplementLogTime(applicationId: string): string | undefined {
+  const logs = listLogsByApplication(applicationId);
+  const latest = [...logs]
+    .reverse()
+    .find(log => log.action === 'submit' && log.oldStatus === 'supplement' && log.newStatus === 'submitted');
+  return latest?.createdAt;
+}
+
+function buildSupplementReviewContext(app: any) {
+  const previousRound = getMaxReviewRound(app.id);
+  if (previousRound <= 0) {
+    return {
+      isSupplementReview: false,
+      previousRound: 0,
+      currentRound: 1,
+      problemItems: [],
+      correctedCount: 0,
+      pendingCount: 0,
+    };
+  }
+
+  const previousOpinions = listReviewOpinionsByApplication(app.id).filter(
+    opinion => opinion.reviewRound === previousRound && opinion.status === 'problem'
+  );
+  const resubmitTime = findLatestSupplementLogTime(app.id);
+  const isSupplementReview = Boolean(
+    previousOpinions.length > 0 &&
+    (resubmitTime || app.supplementReason)
+  );
+
+  if (!isSupplementReview) {
+    return {
+      isSupplementReview: false,
+      previousRound,
+      currentRound: previousRound + 1,
+      problemItems: [],
+      correctedCount: 0,
+      pendingCount: 0,
+    };
+  }
+
+  const files = listAllFilesByApplication(app.id);
+  const problemItems = previousOpinions.map(opinion => {
+    const relatedFiles = files.filter(file =>
+      file.originalName.includes(opinion.materialName) ||
+      opinion.materialName.includes(file.originalName.replace(/\.[^/.]+$/, ''))
+    );
+    const latestFile = relatedFiles.sort((a, b) => b.version - a.version)[0];
+    const hasNewFileVersion = Boolean(
+      latestFile &&
+      new Date(latestFile.createdAt).getTime() > new Date(opinion.createdAt).getTime()
+    );
+
+    return {
+      materialName: opinion.materialName,
+      opinion: opinion.opinion,
+      reviewRound: opinion.reviewRound,
+      reviewedAt: opinion.createdAt,
+      hasNewFileVersion,
+      latestFileVersion: latestFile?.version,
+      latestFileTime: latestFile?.createdAt,
+      status: hasNewFileVersion ? 'corrected' as const : 'pending' as const,
+    };
+  });
+
+  return {
+    isSupplementReview: true,
+    previousRound,
+    currentRound: previousRound + 1,
+    resubmitTime,
+    problemItems,
+    correctedCount: problemItems.filter(item => item.status === 'corrected').length,
+    pendingCount: problemItems.filter(item => item.status === 'pending').length,
   };
 }
 
@@ -476,15 +554,19 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
     applicationId: app.id,
     userId: currentUser.id,
     action: 'submit',
-    description: `提交申请，进入【${currentStepName}】环节`,
+    description: oldStatus === 'supplement'
+      ? `补正后重新提交申请，进入【${currentStepName}】环节`
+      : `提交申请，进入【${currentStepName}】环节`,
     oldStatus,
     newStatus: 'submitted',
   });
 
   notifyStepUsers(flowSteps, 'submitted', {
-    type: 'submit',
-    title: '新申请待受理',
-    content: `申请人 ${currentUser.name} 提交了「${matter?.name || ''}」申请，请及时受理。`,
+    type: oldStatus === 'supplement' ? 'resubmit' : 'submit',
+    title: oldStatus === 'supplement' ? '补正材料已重新提交' : '新申请待受理',
+    content: oldStatus === 'supplement'
+      ? `申请人 ${currentUser.name} 已补正并重新提交「${matter?.name || ''}」申请，请复核上一轮问题项。`
+      : `申请人 ${currentUser.name} 提交了「${matter?.name || ''}」申请，请及时受理。`,
     applicationId: app.id,
   });
 
@@ -914,6 +996,7 @@ router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
   }
 
   const { opinion, pass, reviewOpinions } = req.body;
+  const result: ReviewResult = req.body.result || (pass ? 'pass' : 'reject');
   let app = findApplicationById(req.params.id);
   if (!app) {
     res.json({ success: false, message: '申请不存在' });
@@ -925,6 +1008,27 @@ router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
     return;
   }
 
+  if (!['pass', 'supplement', 'reject'].includes(result)) {
+    res.json({ success: false, message: '审核结果不正确' });
+    return;
+  }
+
+  if (!reviewOpinions || !Array.isArray(reviewOpinions) || reviewOpinions.length === 0) {
+    res.json({ success: false, message: '请提供材料审查意见' });
+    return;
+  }
+
+  for (const op of reviewOpinions) {
+    if (!op.materialName || !op.status) {
+      res.json({ success: false, message: '材料名称和状态不能为空' });
+      return;
+    }
+    if (op.status !== 'pass' && op.status !== 'problem') {
+      res.json({ success: false, message: '状态值不正确' });
+      return;
+    }
+  }
+
   const { matter, flowSteps } = getApplicationFlow(app);
   if (!ensureStepOperator(req, res, flowSteps, 'reviewing')) return;
   
@@ -934,27 +1038,29 @@ router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
   
   let finalOpinion = opinion || '';
   
-  if (reviewOpinions && Array.isArray(reviewOpinions) && reviewOpinions.length > 0) {
-    batchCreateReviewOpinions(
-      appId,
-      reviewOpinions,
-      req.user.id,
-      req.user.name
-    );
-    
-    const summary = generateSummaryOpinion(reviewOpinions);
-    if (summary) {
-      finalOpinion = finalOpinion ? `${finalOpinion}\n\n${summary}` : summary;
-    }
+  let currentReviewRound = getMaxReviewRound(appId) + 1;
+
+  batchCreateReviewOpinions(
+    appId,
+    reviewOpinions,
+    req.user.id,
+    req.user.name,
+    currentReviewRound
+  );
+  
+  const summary = generateSummaryOpinion(reviewOpinions);
+  if (summary) {
+    finalOpinion = finalOpinion ? `${finalOpinion}\n\n${summary}` : summary;
   }
   
-  if (pass) {
+  if (result === 'pass') {
     const currentStepName = getStepName(flowSteps, 'approved');
     
     app = updateApplication(appId, {
       status: 'approved',
       reviewOpinion: finalOpinion,
       reviewerUserId: req.user.id,
+      rejectReason: '',
       currentStep: currentStepName,
     })!;
 
@@ -971,13 +1077,40 @@ router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
       userId: applicantId,
       type: 'review_pass',
       title: '审核通过',
-      content: `您的「${matter?.name || ''}」申请已审核通过，当前环节：${currentStepName}。`,
+      content: `您的「${matter?.name || ''}」申请第 ${currentReviewRound} 轮审核已通过，当前环节：${currentStepName}。`,
       applicationId: appId,
     });
     notifyStepUsers(flowSteps, 'approved', {
       type: 'review_pass',
       title: '申请审核通过待办结',
-      content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时办结。`,
+      content: `「${matter?.name || ''}」申请第 ${currentReviewRound} 轮审核已通过，已进入【${currentStepName}】环节，请及时办结。`,
+      applicationId: appId,
+    });
+  } else if (result === 'supplement') {
+    const currentStepName = getStepName(flowSteps, 'supplement');
+
+    app = updateApplication(appId, {
+      status: 'supplement',
+      reviewOpinion: finalOpinion,
+      reviewerUserId: req.user.id,
+      supplementReason: finalOpinion,
+      currentStep: currentStepName,
+    })!;
+
+    createLog({
+      applicationId: appId,
+      userId: req.user.id,
+      action: 'review',
+      description: `第 ${currentReviewRound} 轮审核要求继续补正，进入【${currentStepName}】环节：${finalOpinion || ''}`,
+      oldStatus,
+      newStatus: 'supplement',
+    });
+
+    createNotification({
+      userId: applicantId,
+      type: 'review_supplement',
+      title: '审核要求继续补正',
+      content: `您的「${matter?.name || ''}」申请第 ${currentReviewRound} 轮审核后仍需补正材料：${finalOpinion || ''}`,
       applicationId: appId,
     });
   } else {
@@ -1005,7 +1138,7 @@ router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
       userId: applicantId,
       type: 'review_reject',
       title: '审核不通过',
-      content: `您的「${matter?.name || ''}」申请审核不通过，原因：${finalOpinion || ''}`,
+      content: `您的「${matter?.name || ''}」申请第 ${currentReviewRound} 轮审核不通过，原因：${finalOpinion || ''}`,
       applicationId: appId,
     });
   }
