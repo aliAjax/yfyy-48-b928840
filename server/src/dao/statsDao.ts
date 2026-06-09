@@ -11,6 +11,11 @@ import {
   MonthlyTrendItem,
   SupplementStats,
   FullStatsOverview,
+  SupplementAnalysisData,
+  SupplementMaterialItem,
+  SupplementMatterItem,
+  SupplementReasonItem,
+  SupplementRepeatItem,
 } from '../types';
 
 function buildWhereClause(params: StatsFilterParams, requireSubmitTime: boolean = false): { where: string; values: any[] } {
@@ -46,6 +51,115 @@ function buildWhereClause(params: StatsFilterParams, requireSubmitTime: boolean 
     where: whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '',
     values,
   };
+}
+
+function buildSupplementLogWhereClause(params: StatsFilterParams): { where: string; values: any[] } {
+  const whereClauses = ['l.action = ?'];
+  const values: any[] = ['supplement'];
+
+  if (params.startDate) {
+    whereClauses.push('DATE(l.created_at) >= DATE(?)');
+    values.push(params.startDate);
+  }
+  if (params.endDate) {
+    whereClauses.push('DATE(l.created_at) <= DATE(?)');
+    values.push(params.endDate);
+  }
+  if (params.department) {
+    whereClauses.push('m.department = ?');
+    values.push(params.department);
+  }
+  if (params.matterId) {
+    whereClauses.push('a.matter_id = ?');
+    values.push(params.matterId);
+  }
+
+  return {
+    where: `WHERE ${whereClauses.join(' AND ')}`,
+    values,
+  };
+}
+
+function buildReviewOpinionWhereClause(params: StatsFilterParams): { where: string; values: any[] } {
+  const whereClauses = ['ro.status = ?'];
+  const values: any[] = ['problem'];
+
+  if (params.startDate) {
+    whereClauses.push('DATE(ro.created_at) >= DATE(?)');
+    values.push(params.startDate);
+  }
+  if (params.endDate) {
+    whereClauses.push('DATE(ro.created_at) <= DATE(?)');
+    values.push(params.endDate);
+  }
+  if (params.department) {
+    whereClauses.push('m.department = ?');
+    values.push(params.department);
+  }
+  if (params.matterId) {
+    whereClauses.push('a.matter_id = ?');
+    values.push(params.matterId);
+  }
+
+  return {
+    where: `WHERE ${whereClauses.join(' AND ')}`,
+    values,
+  };
+}
+
+function extractSupplementReason(description?: string): string {
+  if (!description) return '未填写原因';
+
+  const patterns = [
+    /补正原因[：:]\s*(.+)/,
+    /原因[：:]\s*(.+)/,
+    /要求补正[：:]\s*(.+)/,
+    /补正材料[：:]\s*(.+)/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = description.match(pattern);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return description.trim();
+}
+
+function normalizeReason(reason?: string): string {
+  const trimmed = reason?.trim();
+  if (!trimmed) return '未填写原因';
+
+  if (trimmed.includes('材料不完整') || trimmed.includes('材料缺失') || trimmed.includes('缺少材料')) {
+    return '材料不完整/缺失';
+  }
+  if (trimmed.includes('信息') && (trimmed.includes('不完整') || trimmed.includes('缺失') || trimmed.includes('错误') || trimmed.includes('有误'))) {
+    return '申请信息有误/不完整';
+  }
+  if (trimmed.includes('格式') && (trimmed.includes('不正确') || trimmed.includes('错误') || trimmed.includes('不符'))) {
+    return '材料格式不正确';
+  }
+  if (trimmed.includes('签字') || trimmed.includes('盖章') || trimmed.includes('签名')) {
+    return '缺少签字/盖章';
+  }
+  if (trimmed.includes('有效期') || trimmed.includes('过期') || trimmed.includes('失效')) {
+    return '材料已过期/失效';
+  }
+  if (trimmed.includes('模糊') || trimmed.includes('不清') || trimmed.includes('扫描件') || trimmed.includes('不清晰')) {
+    return '材料不清晰/扫描质量差';
+  }
+  if (trimmed.includes('身份证') || trimmed.includes('身份信息')) {
+    return '身份证明材料问题';
+  }
+  if (trimmed.includes('照片') || trimmed.includes('图片')) {
+    return '照片/图片材料问题';
+  }
+  if (trimmed.includes('内容') && (trimmed.includes('不符') || trimmed.includes('不一致') || trimmed.includes('错误'))) {
+    return '材料内容与实际不符';
+  }
+
+  return trimmed;
 }
 
 export function getStatsOverview(params: StatsFilterParams): StatsOverview {
@@ -423,5 +537,183 @@ export function getFullOverview(params: StatsFilterParams): FullStatsOverview {
     supplementRate: supplement.supplementRate,
     warningRate: warning.warningRate,
     overdueRate: warning.overdueRate,
+  };
+}
+
+export function getSupplementAnalysis(params: StatsFilterParams): SupplementAnalysisData {
+  const logWhere = buildSupplementLogWhereClause(params);
+  const opinionWhere = buildReviewOpinionWhereClause(params);
+
+  const supplementLogsSql = `
+    SELECT 
+      l.id,
+      l.application_id as applicationId,
+      l.description,
+      l.created_at as createdAt,
+      a.application_no as applicationNo,
+      a.matter_id as matterId,
+      m.name as matterName,
+      m.department as department,
+      u.name as applicantName
+    FROM operation_logs l
+    INNER JOIN applications a ON l.application_id = a.id
+    LEFT JOIN matters m ON a.matter_id = m.id
+    LEFT JOIN users u ON a.applicant_id = u.id
+    ${logWhere.where}
+    ORDER BY l.created_at DESC
+  `;
+
+  const reviewOpinionsSql = `
+    SELECT 
+      ro.id,
+      ro.application_id as applicationId,
+      ro.material_name as materialName,
+      ro.opinion,
+      ro.created_at as createdAt,
+      a.application_no as applicationNo,
+      a.matter_id as matterId,
+      m.name as matterName,
+      m.department as department,
+      u.name as applicantName
+    FROM review_opinions ro
+    INNER JOIN applications a ON ro.application_id = a.id
+    LEFT JOIN matters m ON a.matter_id = m.id
+    LEFT JOIN users u ON a.applicant_id = u.id
+    ${opinionWhere.where}
+    ORDER BY ro.created_at DESC
+  `;
+
+  const supplementLogs: any[] = db.prepare(supplementLogsSql).all(...logWhere.values);
+  const reviewOpinions: any[] = db.prepare(reviewOpinionsSql).all(...opinionWhere.values);
+
+  const applicationSupplementMap = new Map<string, { count: number; reasons: string[]; appInfo: any }>();
+  const reasonCounter = new Map<string, { count: number; applicationIds: string[] }>();
+  const matterCounter = new Map<string, SupplementMatterItem>();
+  const materialCounter = new Map<string, { count: number; applicationIds: string[] }>();
+
+  const touchApplication = (item: any, reason: string) => {
+    if (!applicationSupplementMap.has(item.applicationId)) {
+      applicationSupplementMap.set(item.applicationId, {
+        count: 0,
+        reasons: [],
+        appInfo: item,
+      });
+    }
+    const entry = applicationSupplementMap.get(item.applicationId)!;
+    entry.count++;
+    if (!entry.reasons.includes(reason)) {
+      entry.reasons.push(reason);
+    }
+  };
+
+  const addReason = (reason: string, applicationId: string) => {
+    if (!reasonCounter.has(reason)) {
+      reasonCounter.set(reason, { count: 0, applicationIds: [] });
+    }
+    const entry = reasonCounter.get(reason)!;
+    entry.count++;
+    if (!entry.applicationIds.includes(applicationId)) {
+      entry.applicationIds.push(applicationId);
+    }
+  };
+
+  const addMatter = (item: any) => {
+    if (!item.matterId) return;
+    if (!matterCounter.has(item.matterId)) {
+      matterCounter.set(item.matterId, {
+        matterId: item.matterId,
+        matterName: item.matterName || '未知事项',
+        department: item.department || '未分类',
+        supplementCount: 0,
+        applicationIds: [],
+      });
+    }
+    const entry = matterCounter.get(item.matterId)!;
+    entry.supplementCount++;
+    if (!entry.applicationIds.includes(item.applicationId)) {
+      entry.applicationIds.push(item.applicationId);
+    }
+  };
+
+  supplementLogs.forEach(log => {
+    const reason = normalizeReason(extractSupplementReason(log.description));
+    touchApplication(log, reason);
+    addReason(reason, log.applicationId);
+    addMatter(log);
+  });
+
+  reviewOpinions.forEach(opinion => {
+    const reason = normalizeReason(opinion.opinion || `${opinion.materialName || '材料'}存在问题`);
+    touchApplication(opinion, reason);
+    addReason(reason, opinion.applicationId);
+    addMatter(opinion);
+
+    const materialName = opinion.materialName || '未命名材料';
+    if (!materialCounter.has(materialName)) {
+      materialCounter.set(materialName, { count: 0, applicationIds: [] });
+    }
+    const materialEntry = materialCounter.get(materialName)!;
+    materialEntry.count++;
+    if (!materialEntry.applicationIds.includes(opinion.applicationId)) {
+      materialEntry.applicationIds.push(opinion.applicationId);
+    }
+  });
+
+  const topReasons: SupplementReasonItem[] = Array.from(reasonCounter.entries())
+    .map(([reason, data]) => ({
+      reason,
+      count: data.count,
+      applicationIds: data.applicationIds,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 20);
+
+  const topMatters: SupplementMatterItem[] = Array.from(matterCounter.values())
+    .sort((a, b) => b.supplementCount - a.supplementCount)
+    .slice(0, 15);
+
+  const topMaterials: SupplementMaterialItem[] = Array.from(materialCounter.entries())
+    .map(([materialName, data]) => ({
+      materialName,
+      problemCount: data.count,
+      applicationIds: data.applicationIds,
+    }))
+    .sort((a, b) => b.problemCount - a.problemCount)
+    .slice(0, 15);
+
+  const repeatedSupplements: SupplementRepeatItem[] = Array.from(applicationSupplementMap.entries())
+    .filter(([, data]) => data.count > 1)
+    .map(([applicationId, data]) => ({
+      applicationId,
+      applicationNo: data.appInfo?.applicationNo || '',
+      matterName: data.appInfo?.matterName || '未知事项',
+      applicantName: data.appInfo?.applicantName || '',
+      supplementCount: data.count,
+      reasons: data.reasons,
+    }))
+    .sort((a, b) => b.supplementCount - a.supplementCount)
+    .slice(0, 20);
+
+  const totalSupplementCount = supplementLogs.length + reviewOpinions.length;
+  const totalApplicationsWithSupplement = applicationSupplementMap.size;
+  const maxSupplementCount = Array.from(applicationSupplementMap.values()).reduce(
+    (max, item) => Math.max(max, item.count),
+    0
+  );
+  const avgSupplementPerApplication = totalApplicationsWithSupplement > 0
+    ? Number((totalSupplementCount / totalApplicationsWithSupplement).toFixed(2))
+    : 0;
+
+  return {
+    overview: {
+      totalSupplementCount,
+      totalApplicationsWithSupplement,
+      avgSupplementPerApplication,
+      maxSupplementCount,
+    },
+    topReasons,
+    topMatters,
+    topMaterials,
+    repeatedSupplements,
   };
 }

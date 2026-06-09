@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Table, Card, Input, Select, Button, Space, Tag, Modal, message } from 'antd';
+import { Table, Card, Input, Select, Button, Space, Tag, Modal, message, Typography } from 'antd';
 import { SearchOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { listApplications, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication } from '../api/applicationApi';
 import { Application, ApplicationStatus, WarningStatus } from '../types';
@@ -8,12 +8,15 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import dayjs from 'dayjs';
 
+const { Text } = Typography;
+
 interface ApplicationListPageProps {
   showAll?: boolean;
   reviewMode?: boolean;
 }
 
 export default function ApplicationListPage({ showAll = false, reviewMode = false }: ApplicationListPageProps) {
+  const location = useLocation() as any;
   const [applications, setApplications] = useState<Application[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -22,10 +25,17 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [warningFilter, setWarningFilter] = useState<string>('');
+  const [hasSupplementFilter, setHasSupplementFilter] = useState<boolean>(!!location.state?.hasSupplement);
+  const [supplementReasonFilter, setSupplementReasonFilter] = useState<string>((location.state?.supplementReason as string) || '');
+  const [applicationIdsFilter, setApplicationIdsFilter] = useState<string[]>(
+    Array.isArray(location.state?.applicationIds) ? location.state.applicationIds : []
+  );
+  const [matterFilter, setMatterFilter] = useState<string>((location.state?.matterId as string) || '');
+  const [matterFilterName, setMatterFilterName] = useState<string>((location.state?.matterName as string) || '');
+  const [materialFilterName, setMaterialFilterName] = useState<string>((location.state?.materialName as string) || '');
   
   const { user } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation() as any;
 
   const canFilterByWarning = user?.role === 'window' || user?.role === 'admin';
 
@@ -33,11 +43,37 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
     if (location.state?.warningFilter) {
       setWarningFilter(location.state.warningFilter);
     }
+    if (location.state?.hasSupplement) {
+      setHasSupplementFilter(true);
+    }
+    if (location.state?.supplementReason) {
+      setSupplementReasonFilter(location.state.supplementReason);
+    }
+    if (Array.isArray(location.state?.applicationIds)) {
+      setApplicationIdsFilter(location.state.applicationIds);
+    }
+    if (location.state?.matterId) {
+      setMatterFilter(location.state.matterId);
+      setMatterFilterName(location.state.matterName || '');
+    }
+    if (location.state?.materialName) {
+      setMaterialFilterName(location.state.materialName);
+    }
   }, []);
 
   useEffect(() => {
     loadApplications();
-  }, [page, pageSize, keyword, statusFilter, warningFilter]);
+  }, [
+    page,
+    pageSize,
+    keyword,
+    statusFilter,
+    warningFilter,
+    hasSupplementFilter,
+    supplementReasonFilter,
+    applicationIdsFilter,
+    matterFilter,
+  ]);
 
   const loadApplications = async () => {
     setLoading(true);
@@ -46,6 +82,13 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
       if (keyword) params.keyword = keyword;
       if (statusFilter) params.status = statusFilter;
       if (warningFilter && canFilterByWarning) params.warningStatus = warningFilter;
+      if (matterFilter) params.matterId = matterFilter;
+      if (applicationIdsFilter.length > 0) {
+        params.applicationIds = applicationIdsFilter;
+      } else {
+        if (hasSupplementFilter) params.hasSupplement = true;
+        if (supplementReasonFilter) params.supplementReason = supplementReasonFilter;
+      }
 
       const res = await listApplications(params);
       if (res.success) {
@@ -66,6 +109,12 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
     setKeyword('');
     setStatusFilter('');
     setWarningFilter('');
+    setHasSupplementFilter(false);
+    setSupplementReasonFilter('');
+    setApplicationIdsFilter([]);
+    setMatterFilter('');
+    setMatterFilterName('');
+    setMaterialFilterName('');
     setPage(1);
   };
 
@@ -304,6 +353,54 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
     { value: 'overdue', label: '已超期' },
   ];
 
+  const activeFilterTags = () => {
+    const tags: JSX.Element[] = [];
+    if (hasSupplementFilter) {
+      tags.push(
+        <Tag key="hasSupplement" color="warning" closable onClose={() => setHasSupplementFilter(false)}>
+          仅显示有补正记录
+        </Tag>
+      );
+    }
+    if (supplementReasonFilter) {
+      tags.push(
+        <Tag key="supplementReason" color="orange" closable onClose={() => setSupplementReasonFilter('')}>
+          补正原因：{supplementReasonFilter}
+        </Tag>
+      );
+    }
+    if (applicationIdsFilter.length > 0) {
+      tags.push(
+        <Tag key="applicationIds" color="purple" closable onClose={() => setApplicationIdsFilter([])}>
+          相关申请：{applicationIdsFilter.length}条
+        </Tag>
+      );
+    }
+    if (matterFilter) {
+      tags.push(
+        <Tag
+          key="matterId"
+          color="blue"
+          closable
+          onClose={() => {
+            setMatterFilter('');
+            setMatterFilterName('');
+          }}
+        >
+          事项：{matterFilterName || matterFilter}
+        </Tag>
+      );
+    }
+    if (materialFilterName) {
+      tags.push(
+        <Tag key="materialName" color="volcano" closable onClose={() => setMaterialFilterName('')}>
+          材料：{materialFilterName}
+        </Tag>
+      );
+    }
+    return tags;
+  };
+
   return (
     <Card
       title={reviewMode ? '待审核申请' : showAll ? '申请管理' : '我的申请'}
@@ -337,6 +434,12 @@ export default function ApplicationListPage({ showAll = false, reviewMode = fals
         </Space>
       }
     >
+      {(hasSupplementFilter || supplementReasonFilter || applicationIdsFilter.length > 0 || matterFilter || materialFilterName) && (
+        <div style={{ marginBottom: 16 }}>
+          <Text type="secondary" style={{ marginRight: 8 }}>当前筛选：</Text>
+          {activeFilterTags()}
+        </div>
+      )}
       <Table
         rowKey="id"
         loading={loading}

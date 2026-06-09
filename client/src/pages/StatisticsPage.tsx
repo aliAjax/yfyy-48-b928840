@@ -49,8 +49,10 @@ import {
   getUserStats,
   getWarningStats,
   getDepartmentList,
+  getSupplementAnalysis,
 } from '../api/statsApi';
 import { listMatters } from '../api/matterApi';
+import { useNavigate } from 'react-router-dom';
 import {
   FullStatsOverview,
   DailyTrendItem,
@@ -61,6 +63,7 @@ import {
   UserStatsItem,
   WarningStats,
   Matter,
+  SupplementAnalysisData,
 } from '../types';
 import { statusLabels, statusColors, roleLabels } from '../utils/common';
 
@@ -72,6 +75,7 @@ type TrendType = 'daily' | 'monthly';
 
 export default function StatisticsPage() {
   const [form] = Form.useForm();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const [trendType, setTrendType] = useState<TrendType>('daily');
@@ -105,6 +109,18 @@ export default function StatisticsPage() {
     overdueCount: 0,
     warningRate: 0,
     overdueRate: 0,
+  });
+  const [supplementAnalysis, setSupplementAnalysis] = useState<SupplementAnalysisData>({
+    overview: {
+      totalSupplementCount: 0,
+      totalApplicationsWithSupplement: 0,
+      avgSupplementPerApplication: 0,
+      maxSupplementCount: 0,
+    },
+    topReasons: [],
+    topMatters: [],
+    topMaterials: [],
+    repeatedSupplements: [],
   });
   const [departments, setDepartments] = useState<string[]>([]);
   const [matters, setMatters] = useState<Matter[]>([]);
@@ -171,6 +187,7 @@ export default function StatisticsPage() {
         statusRes,
         userRes,
         warningRes,
+        supplementRes,
       ] = await Promise.all([
         getFullOverview(params),
         getDailyTrend(params),
@@ -180,6 +197,7 @@ export default function StatisticsPage() {
         getStatusStats(params),
         getUserStats(params),
         getWarningStats(params),
+        getSupplementAnalysis(params),
       ]);
 
       if (overviewRes.success) setOverview(overviewRes.data || ({} as FullStatsOverview));
@@ -190,6 +208,20 @@ export default function StatisticsPage() {
       if (statusRes.success) setStatusStats(statusRes.data || []);
       if (userRes.success) setUserStats(userRes.data || []);
       if (warningRes.success) setWarningStats(warningRes.data || ({} as WarningStats));
+      if (supplementRes.success) {
+        setSupplementAnalysis(supplementRes.data || {
+          overview: {
+            totalSupplementCount: 0,
+            totalApplicationsWithSupplement: 0,
+            avgSupplementPerApplication: 0,
+            maxSupplementCount: 0,
+          },
+          topReasons: [],
+          topMatters: [],
+          topMaterials: [],
+          repeatedSupplements: [],
+        });
+      }
     } catch (error) {
       console.error('加载统计数据失败', error);
     } finally {
@@ -508,6 +540,75 @@ export default function StatisticsPage() {
         },
       ],
     };
+  };
+
+  const getSupplementReasonOption = () => ({
+    tooltip: { trigger: 'axis' },
+    grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: supplementAnalysis.topReasons.slice(0, 10).map(item => item.reason),
+      axisLabel: { rotate: 30, interval: 0 },
+    },
+    yAxis: { type: 'value' },
+    series: [
+      {
+        name: '补正次数',
+        type: 'bar',
+        data: supplementAnalysis.topReasons.slice(0, 10).map(item => item.count),
+        itemStyle: { color: '#faad14' },
+      },
+    ],
+  });
+
+  const getSupplementMatterOption = () => ({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: { type: 'value' },
+    yAxis: {
+      type: 'category',
+      data: supplementAnalysis.topMatters.slice(0, 10).map(item => item.matterName),
+    },
+    series: [
+      {
+        name: '补正次数',
+        type: 'bar',
+        data: supplementAnalysis.topMatters.slice(0, 10).map(item => item.supplementCount),
+        itemStyle: { color: '#1890ff' },
+      },
+    ],
+  });
+
+  const getSupplementMaterialOption = () => ({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { bottom: 0, left: 'center' },
+    series: [
+      {
+        name: '问题材料',
+        type: 'pie',
+        radius: ['45%', '70%'],
+        data: supplementAnalysis.topMaterials.slice(0, 10).map(item => ({
+          name: item.materialName,
+          value: item.problemCount,
+        })),
+      },
+    ],
+  });
+
+  const jumpToApplications = (state: {
+    hasSupplement?: boolean;
+    supplementReason?: string;
+    matterId?: string;
+    matterName?: string;
+    materialName?: string;
+    applicationIds?: string[];
+  }) => {
+    navigate('/applications', {
+      state: {
+        ...state,
+        fromStatistics: true,
+      },
+    });
   };
 
   const matterRankColumns = [
@@ -1196,6 +1297,282 @@ export default function StatisticsPage() {
                     <li>已超期：办理时长 {'>'} 承诺时限</li>
                   </ul>
                 </div>
+              </Card>
+            </Col>
+          </Row>
+        </TabPane>
+
+        <TabPane
+          tab={
+            <span>
+              <EditOutlined />
+              补正原因分析
+            </span>
+          }
+          key="supplement-analysis"
+        >
+          <Row gutter={16} style={{ marginBottom: 16 }}>
+            <Col span={6}>
+              <Card loading={loading}>
+                <Statistic
+                  title="补正总次数"
+                  value={supplementAnalysis.overview.totalSupplementCount}
+                  prefix={<EditOutlined style={{ color: '#faad14' }} />}
+                  valueStyle={{ color: '#faad14' }}
+                />
+              </Card>
+            </Col>
+            <Col span={6}>
+              <Card loading={loading}>
+                <Statistic
+                  title="涉及申请数"
+                  value={supplementAnalysis.overview.totalApplicationsWithSupplement}
+                  prefix={<FileTextOutlined style={{ color: '#1890ff' }} />}
+                  valueStyle={{ color: '#1890ff' }}
+                />
+              </Card>
+            </Col>
+            <Col span={6}>
+              <Card loading={loading}>
+                <Statistic
+                  title="平均补正次数"
+                  value={supplementAnalysis.overview.avgSupplementPerApplication}
+                  suffix="次/申请"
+                  prefix={<BarChartOutlined style={{ color: '#722ed1' }} />}
+                  valueStyle={{ color: '#722ed1' }}
+                />
+              </Card>
+            </Col>
+            <Col span={6}>
+              <Card loading={loading}>
+                <Statistic
+                  title="最高补正次数"
+                  value={supplementAnalysis.overview.maxSupplementCount}
+                  prefix={<ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />}
+                  valueStyle={{ color: '#ff4d4f' }}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          <Row gutter={16} style={{ marginBottom: 16 }}>
+            <Col span={12}>
+              <Card loading={loading} title="高频补正原因TOP 10">
+                <ReactECharts option={getSupplementReasonOption()} style={{ height: 340 }} />
+              </Card>
+            </Col>
+            <Col span={12}>
+              <Card loading={loading} title="涉及事项TOP 10">
+                <ReactECharts option={getSupplementMatterOption()} style={{ height: 340 }} />
+              </Card>
+            </Col>
+          </Row>
+
+          <Row gutter={16} style={{ marginBottom: 16 }}>
+            <Col span={10}>
+              <Card loading={loading} title="问题材料分布">
+                <ReactECharts option={getSupplementMaterialOption()} style={{ height: 340 }} />
+              </Card>
+            </Col>
+            <Col span={14}>
+              <Card
+                loading={loading}
+                title="重复补正申请"
+                extra={<Text type="secondary">按补正次数排序</Text>}
+              >
+                <Table
+                  dataSource={supplementAnalysis.repeatedSupplements}
+                  rowKey="applicationId"
+                  pagination={{ pageSize: 5 }}
+                  size="middle"
+                  columns={[
+                    {
+                      title: '申请编号',
+                      dataIndex: 'applicationNo',
+                      key: 'applicationNo',
+                      width: 160,
+                    },
+                    {
+                      title: '事项',
+                      dataIndex: 'matterName',
+                      key: 'matterName',
+                      ellipsis: true,
+                    },
+                    {
+                      title: '申请人',
+                      dataIndex: 'applicantName',
+                      key: 'applicantName',
+                      width: 100,
+                    },
+                    {
+                      title: '补正次数',
+                      dataIndex: 'supplementCount',
+                      key: 'supplementCount',
+                      width: 100,
+                      render: (value: number) => <Tag color="error">{value}</Tag>,
+                    },
+                    {
+                      title: '操作',
+                      key: 'action',
+                      width: 90,
+                      render: (_: any, record: any) => (
+                        <Button type="link" onClick={() => navigate(`/applications/${record.applicationId}`)}>
+                          查看详情
+                        </Button>
+                      ),
+                    },
+                  ]}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          <Card loading={loading} title="高频补正原因明细" style={{ marginBottom: 16 }}>
+            <Table
+              dataSource={supplementAnalysis.topReasons}
+              rowKey="reason"
+              pagination={{ pageSize: 8 }}
+              size="middle"
+              columns={[
+                {
+                  title: '补正原因',
+                  dataIndex: 'reason',
+                  key: 'reason',
+                  ellipsis: true,
+                },
+                {
+                  title: '补正次数',
+                  dataIndex: 'count',
+                  key: 'count',
+                  width: 120,
+                  sorter: (a: any, b: any) => a.count - b.count,
+                  render: (value: number) => <Tag color="warning">{value}</Tag>,
+                },
+                {
+                  title: '涉及申请数',
+                  dataIndex: 'applicationIds',
+                  key: 'applicationCount',
+                  width: 120,
+                  render: (ids: string[]) => ids.length,
+                },
+                {
+                  title: '操作',
+                  key: 'action',
+                  width: 120,
+                  render: (_: any, record: any) => (
+                    <Button
+                      type="link"
+                      onClick={() => jumpToApplications({
+                        hasSupplement: true,
+                        supplementReason: record.reason,
+                        applicationIds: record.applicationIds,
+                      })}
+                    >
+                      查看申请
+                    </Button>
+                  ),
+                },
+              ]}
+            />
+          </Card>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Card loading={loading} title="补正涉及事项明细">
+                <Table
+                  dataSource={supplementAnalysis.topMatters}
+                  rowKey="matterId"
+                  pagination={{ pageSize: 8 }}
+                  size="middle"
+                  columns={[
+                    {
+                      title: '事项名称',
+                      dataIndex: 'matterName',
+                      key: 'matterName',
+                      ellipsis: true,
+                    },
+                    {
+                      title: '所属部门',
+                      dataIndex: 'department',
+                      key: 'department',
+                      width: 120,
+                    },
+                    {
+                      title: '补正次数',
+                      dataIndex: 'supplementCount',
+                      key: 'supplementCount',
+                      width: 100,
+                      render: (value: number) => <Tag color="processing">{value}</Tag>,
+                    },
+                    {
+                      title: '操作',
+                      key: 'action',
+                      width: 100,
+                      render: (_: any, record: any) => (
+                        <Button
+                          type="link"
+                          onClick={() => jumpToApplications({
+                            hasSupplement: true,
+                            matterId: record.matterId,
+                            matterName: record.matterName,
+                            applicationIds: record.applicationIds,
+                          })}
+                        >
+                          查看申请
+                        </Button>
+                      ),
+                    },
+                  ]}
+                />
+              </Card>
+            </Col>
+            <Col span={12}>
+              <Card loading={loading} title="问题材料明细">
+                <Table
+                  dataSource={supplementAnalysis.topMaterials}
+                  rowKey="materialName"
+                  pagination={{ pageSize: 8 }}
+                  size="middle"
+                  columns={[
+                    {
+                      title: '材料名称',
+                      dataIndex: 'materialName',
+                      key: 'materialName',
+                      ellipsis: true,
+                    },
+                    {
+                      title: '问题次数',
+                      dataIndex: 'problemCount',
+                      key: 'problemCount',
+                      width: 100,
+                      render: (value: number) => <Tag color="volcano">{value}</Tag>,
+                    },
+                    {
+                      title: '涉及申请数',
+                      dataIndex: 'applicationIds',
+                      key: 'applicationCount',
+                      width: 110,
+                      render: (ids: string[]) => ids.length,
+                    },
+                    {
+                      title: '操作',
+                      key: 'action',
+                      width: 100,
+                      render: (_: any, record: any) => (
+                        <Button
+                          type="link"
+                          onClick={() => jumpToApplications({
+                            hasSupplement: true,
+                            materialName: record.materialName,
+                            applicationIds: record.applicationIds,
+                          })}
+                        >
+                          查看申请
+                        </Button>
+                      ),
+                    },
+                  ]}
+                />
               </Card>
             </Col>
           </Row>

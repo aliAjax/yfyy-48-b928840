@@ -6,10 +6,17 @@ export function listApplications(params?: {
   keyword?: string;
   matterId?: string;
   warningStatus?: WarningStatus;
+  hasSupplement?: boolean;
+  supplementReason?: string;
+  applicationIds?: string[];
   page?: number;
   pageSize?: number;
 }): Promise<ApiResponse<Application[]>> {
-  return request.get('/applications', { params });
+  const reqParams: any = { ...params };
+  if (params?.applicationIds && params.applicationIds.length > 0) {
+    reqParams.applicationIds = params.applicationIds.join(',');
+  }
+  return request.get('/applications', { params: reqParams });
 }
 
 export function getApplication(id: string): Promise<ApiResponse<Application>> {

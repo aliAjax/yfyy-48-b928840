@@ -87,11 +87,26 @@ function notifyStepUsers(
 router.get('/', authMiddleware, (req: AuthRequest, res) => {
   if (!req.user) return;
   
-  const { status, keyword, page = 1, pageSize = 10, matterId, warningStatus } = req.query;
+  const {
+    status,
+    keyword,
+    page = 1,
+    pageSize = 10,
+    matterId,
+    warningStatus,
+    hasSupplement,
+    supplementReason,
+    applicationIds,
+  } = req.query;
   
   let applicantId: string | undefined;
   if (req.user.role === 'applicant') {
     applicantId = req.user.id;
+  }
+
+  let applicationIdsArr: string[] | undefined;
+  if (applicationIds && typeof applicationIds === 'string') {
+    applicationIdsArr = applicationIds.split(',').map(id => id.trim()).filter(Boolean);
   }
 
   const result = listApplications({
@@ -99,6 +114,9 @@ router.get('/', authMiddleware, (req: AuthRequest, res) => {
     matterId: matterId as string,
     status: status as ApplicationStatus,
     keyword: keyword as string,
+    hasSupplement: hasSupplement === 'true',
+    supplementReason: supplementReason as string,
+    applicationIds: applicationIdsArr,
   });
 
   let enriched = result.applications.map(enrichApplication);

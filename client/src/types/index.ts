@@ -263,6 +263,50 @@ export interface SupplementStats {
   avgSupplementCount: number;
 }
 
+export interface SupplementReasonItem {
+  reason: string;
+  count: number;
+  applicationIds: string[];
+}
+
+export interface SupplementMatterItem {
+  matterId: string;
+  matterName: string;
+  department: string;
+  supplementCount: number;
+  applicationIds: string[];
+}
+
+export interface SupplementMaterialItem {
+  materialName: string;
+  problemCount: number;
+  applicationIds: string[];
+}
+
+export interface SupplementRepeatItem {
+  applicationId: string;
+  applicationNo: string;
+  matterName: string;
+  applicantName: string;
+  supplementCount: number;
+  reasons: string[];
+}
+
+export interface SupplementAnalysisOverview {
+  totalSupplementCount: number;
+  totalApplicationsWithSupplement: number;
+  avgSupplementPerApplication: number;
+  maxSupplementCount: number;
+}
+
+export interface SupplementAnalysisData {
+  overview: SupplementAnalysisOverview;
+  topReasons: SupplementReasonItem[];
+  topMatters: SupplementMatterItem[];
+  topMaterials: SupplementMaterialItem[];
+  repeatedSupplements: SupplementRepeatItem[];
+}
+
 export interface FullStatsOverview extends StatsOverview {
   inProgressCount: number;
   supplementCount: number;

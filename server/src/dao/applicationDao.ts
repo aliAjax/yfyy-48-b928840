@@ -61,6 +61,9 @@ export function listApplications(params?: {
   matterId?: string;
   status?: ApplicationStatus;
   keyword?: string;
+  hasSupplement?: boolean;
+  supplementReason?: string;
+  applicationIds?: string[];
   page?: number;
   pageSize?: number;
 }): { applications: Application[]; total: number } {
@@ -82,6 +85,42 @@ export function listApplications(params?: {
   if (params?.keyword) {
     whereClauses.push('application_no LIKE ?');
     paramsArr.push(`%${params.keyword}%`);
+  }
+  if (params?.applicationIds && params.applicationIds.length > 0) {
+    const placeholders = params.applicationIds.map(() => '?').join(',');
+    whereClauses.push(`id IN (${placeholders})`);
+    paramsArr.push(...params.applicationIds);
+  }
+  if (params?.hasSupplement) {
+    whereClauses.push(`(
+      status = 'supplement'
+      OR (supplement_reason IS NOT NULL AND supplement_reason != '')
+      OR EXISTS (SELECT 1 FROM operation_logs l WHERE l.application_id = applications.id AND l.action = 'supplement')
+      OR EXISTS (SELECT 1 FROM review_opinions ro WHERE ro.application_id = applications.id AND ro.status = 'problem')
+    )`);
+  }
+  if (params?.supplementReason) {
+    whereClauses.push(`(
+      supplement_reason LIKE ?
+      OR EXISTS (
+        SELECT 1 FROM operation_logs l
+        WHERE l.application_id = applications.id
+          AND l.action = 'supplement'
+          AND l.description LIKE ?
+      )
+      OR EXISTS (
+        SELECT 1 FROM review_opinions ro
+        WHERE ro.application_id = applications.id
+          AND ro.status = 'problem'
+          AND (ro.opinion LIKE ? OR ro.material_name LIKE ?)
+      )
+    )`);
+    paramsArr.push(
+      `%${params.supplementReason}%`,
+      `%${params.supplementReason}%`,
+      `%${params.supplementReason}%`,
+      `%${params.supplementReason}%`
+    );
   }
 
   const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';

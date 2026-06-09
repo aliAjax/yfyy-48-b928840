@@ -12,6 +12,7 @@ import {
   MonthlyTrendItem,
   SupplementStats,
   FullStatsOverview,
+  SupplementAnalysisData,
 } from '../types';
 
 export function getStatsOverview(params?: StatsFilterParams): Promise<ApiResponse<StatsOverview>> {
@@ -52,6 +53,10 @@ export function getWarningStats(params?: StatsFilterParams): Promise<ApiResponse
 
 export function getSupplementStats(params?: StatsFilterParams): Promise<ApiResponse<SupplementStats>> {
   return request.get('/stats/supplement-stats', { params });
+}
+
+export function getSupplementAnalysis(params?: StatsFilterParams): Promise<ApiResponse<SupplementAnalysisData>> {
+  return request.get('/stats/supplement-analysis', { params });
 }
 
 export function getDepartmentList(): Promise<ApiResponse<string[]>> {
