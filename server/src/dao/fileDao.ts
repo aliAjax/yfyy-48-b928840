@@ -1,7 +1,21 @@
 import db from '../database';
-import { MaterialFile } from '../types';
+import { MaterialFile, FileVersionCompareResult, FileVersionDiffField } from '../types';
 import { generateId, now } from '../utils/helpers';
 import { findUserById } from './userDao';
+
+const TEXT_MIME_TYPES = [
+  'text/plain',
+  'text/html',
+  'text/css',
+  'text/javascript',
+  'text/csv',
+  'text/markdown',
+  'application/json',
+  'application/xml',
+  'text/xml',
+  'application/x-yaml',
+  'text/yaml',
+];
 
 interface RawFile {
   id: string;
@@ -180,4 +194,46 @@ export function canDeleteFile(fileId: string, userId: string, userRole: string, 
   }
 
   return { canDelete: true };
+}
+
+function isTextFile(mimeType?: string): boolean {
+  if (!mimeType) return false;
+  return TEXT_MIME_TYPES.includes(mimeType) || mimeType.startsWith('text/');
+}
+
+export function compareFileVersions(applicationId: string, file1Id: string, file2Id: string): FileVersionCompareResult | null {
+  const file1 = findFileById(file1Id);
+  const file2 = findFileById(file2Id);
+
+  if (!file1 || !file2) return null;
+  if (file1.applicationId !== applicationId || file2.applicationId !== applicationId) return null;
+  if (file1.originalName !== file2.originalName) return null;
+
+  const fields: Array<{ key: keyof MaterialFile; label: string }> = [
+    { key: 'createdAt', label: '上传时间' },
+    { key: 'uploadedByName', label: '上传人' },
+    { key: 'versionNote', label: '版本说明' },
+    { key: 'fileSize', label: '文件大小' },
+    { key: 'isCurrent', label: '当前版本标记' },
+  ];
+
+  const diffs: FileVersionDiffField[] = fields.map(({ key, label }) => {
+    const oldValue = file1[key] as string | number | boolean | undefined;
+    const newValue = file2[key] as string | number | boolean | undefined;
+    return {
+      field: key,
+      label,
+      oldValue,
+      newValue,
+      changed: oldValue !== newValue,
+    };
+  });
+
+  return {
+    file1,
+    file2,
+    isTextFile: isTextFile(file1.mimeType) && isTextFile(file2.mimeType),
+    diffs,
+    hasDifferences: diffs.some(diff => diff.changed),
+  };
 }

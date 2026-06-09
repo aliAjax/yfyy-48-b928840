@@ -292,3 +292,19 @@ export interface ReviewOpinionFormData {
   status: ReviewOpinionStatus;
   opinion: string;
 }
+
+export interface FileVersionDiffField {
+  field: string;
+  label: string;
+  oldValue: string | number | boolean | undefined;
+  newValue: string | number | boolean | undefined;
+  changed: boolean;
+}
+
+export interface FileVersionCompareResult {
+  file1: MaterialFile;
+  file2: MaterialFile;
+  isTextFile: boolean;
+  diffs: FileVersionDiffField[];
+  hasDifferences: boolean;
+}

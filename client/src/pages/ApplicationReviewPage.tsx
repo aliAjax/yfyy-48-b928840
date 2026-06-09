@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider, Steps, Tooltip, Modal, Table, Collapse, Empty } from 'antd';
-import { ArrowLeftOutlined, FileTextOutlined, UserOutlined, HistoryOutlined, DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SaveOutlined, CheckOutlined, CloseOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider, Steps, Tooltip, Modal, Table, Collapse, Empty, Alert, Row, Col } from 'antd';
+import { ArrowLeftOutlined, FileTextOutlined, UserOutlined, HistoryOutlined, DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SaveOutlined, CheckOutlined, CloseOutlined, FolderOpenOutlined, DiffOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, reviewApplication, getReviewOpinions, saveReviewOpinions } from '../api/applicationApi';
-import { Application, FlowStep, MaterialFile, ReviewOpinionFormData, ReviewOpinion, MatterMaterial } from '../types';
+import { Application, FlowStep, MaterialFile, ReviewOpinionFormData, ReviewOpinion, MatterMaterial, FileVersionCompareResult } from '../types';
 import { statusLabels, statusColors, formatFileSize, safeJSONParse, parseFlowConfig, roleLabels } from '../utils/common';
-import { getDownloadUrl, listFileVersions } from '../api/fileApi';
+import { getDownloadUrl, listFileVersions, compareFileVersions } from '../api/fileApi';
 import { getMatter } from '../api/matterApi';
 import dayjs from 'dayjs';
 
@@ -28,6 +28,10 @@ export default function ApplicationReviewPage() {
   const [reviewOpinions, setReviewOpinions] = useState<ReviewOpinion[]>([]);
   const [formData, setFormData] = useState<ReviewOpinionFormData[]>([]);
   const [initialized, setInitialized] = useState(false);
+  const [selectedCompareIds, setSelectedCompareIds] = useState<string[]>([]);
+  const [compareModalVisible, setCompareModalVisible] = useState(false);
+  const [compareResult, setCompareResult] = useState<FileVersionCompareResult | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -205,6 +209,8 @@ export default function ApplicationReviewPage() {
   const handleViewVersions = async (file: MaterialFile) => {
     setCurrentVersionFile(file);
     setVersionModalVisible(true);
+    setSelectedCompareIds([]);
+    setCompareResult(null);
     await loadVersionHistory(file.originalName);
   };
 
@@ -219,6 +225,77 @@ export default function ApplicationReviewPage() {
     } finally {
       setVersionLoading(false);
     }
+  };
+
+  const handleClearCompareSelection = () => {
+    setSelectedCompareIds([]);
+  };
+
+  const handleCompareVersions = async () => {
+    if (selectedCompareIds.length !== 2) {
+      message.warning('请选择两个版本进行对比');
+      return;
+    }
+
+    const selectedFiles = selectedCompareIds
+      .map(fileId => versionList.find(file => file.id === fileId))
+      .filter((file): file is MaterialFile => Boolean(file))
+      .sort((a, b) => a.version - b.version);
+
+    if (selectedFiles.length !== 2) {
+      message.error('所选版本不存在，请重新选择');
+      return;
+    }
+
+    setCompareLoading(true);
+    try {
+      const res = await compareFileVersions(id!, selectedFiles[0].id, selectedFiles[1].id);
+      if (res.success && res.data) {
+        setCompareResult(res.data);
+        setCompareModalVisible(true);
+      } else {
+        message.error(res.message || '版本对比失败');
+      }
+    } catch {
+      message.error('版本对比失败');
+    } finally {
+      setCompareLoading(false);
+    }
+  };
+
+  const renderDiffValue = (field: string, value: string | number | boolean | undefined) => {
+    if (value === undefined || value === null || value === '') {
+      return <span style={{ color: '#bfbfbf' }}>无</span>;
+    }
+
+    if (field === 'createdAt') {
+      return dayjs(value as string).format('YYYY-MM-DD HH:mm:ss');
+    }
+
+    if (field === 'fileSize') {
+      return formatFileSize(value as number);
+    }
+
+    if (field === 'isCurrent') {
+      return value ? (
+        <Tag color="success" icon={<CheckCircleOutlined />}>当前版本</Tag>
+      ) : (
+        <Tag color="default">历史版本</Tag>
+      );
+    }
+
+    return String(value);
+  };
+
+  const compareButtonText = () => {
+    if (selectedCompareIds.length !== 2) {
+      return `已选 ${selectedCompareIds.length}/2 个版本`;
+    }
+    const versions = selectedCompareIds
+      .map(fileId => versionList.find(file => file.id === fileId)?.version)
+      .filter((version): version is number => typeof version === 'number')
+      .sort((a, b) => a - b);
+    return versions.length === 2 ? `对比 v${versions[0]} 与 v${versions[1]}` : '版本对比';
   };
 
   const basicInfo = application ? safeJSONParse<Record<string, any>>(application.basicInfo, {}) : {};
@@ -466,19 +543,68 @@ export default function ApplicationReviewPage() {
           <Space>
             <span>{currentVersionFile?.originalName} - 版本历史</span>
             <Tag color="blue">共 {versionList.length} 个版本</Tag>
+            {versionList.length >= 2 && (
+              <Tag color="orange">可勾选2个版本对比</Tag>
+            )}
           </Space>
         }
         open={versionModalVisible}
         onCancel={() => setVersionModalVisible(false)}
-        footer={null}
-        width={800}
+        footer={
+          <Space>
+            {selectedCompareIds.length > 0 && (
+              <Button onClick={handleClearCompareSelection}>
+                清除选择
+              </Button>
+            )}
+            <Button
+              type="primary"
+              icon={<DiffOutlined />}
+              disabled={selectedCompareIds.length !== 2}
+              loading={compareLoading}
+              onClick={handleCompareVersions}
+            >
+              {compareButtonText()}
+            </Button>
+            <Button onClick={() => setVersionModalVisible(false)}>
+              关闭
+            </Button>
+          </Space>
+        }
+        width={versionList.length >= 2 ? 900 : 800}
       >
+        {versionList.length >= 2 && (
+          <Alert
+            type="info"
+            showIcon
+            icon={<DiffOutlined />}
+            message={
+              selectedCompareIds.length === 0
+                ? '勾选表格左侧复选框，选择同一材料的两个版本进行对比'
+                : selectedCompareIds.length === 1
+                  ? '已选择1个版本，请再选择1个版本'
+                  : '已选择2个版本，可查看元数据差异摘要'
+            }
+            style={{ marginBottom: 16 }}
+          />
+        )}
         <Table
           dataSource={versionList}
           rowKey="id"
           loading={versionLoading}
           pagination={false}
           size="middle"
+          rowSelection={versionList.length >= 2 ? {
+            type: 'checkbox',
+            selectedRowKeys: selectedCompareIds,
+            onChange: (keys) => {
+              if (keys.length > 2) {
+                message.warning('最多只能选择两个版本进行对比');
+                return;
+              }
+              setSelectedCompareIds(keys as string[]);
+            },
+          } : undefined}
           columns={[
             {
               title: '版本',
@@ -546,6 +672,194 @@ export default function ApplicationReviewPage() {
         />
         {versionList.length === 0 && !versionLoading && (
           <Empty description="暂无版本记录" />
+        )}
+      </Modal>
+
+      <Modal
+        title={
+          compareResult ? (
+            <Space>
+              <DiffOutlined />
+              <span>版本对比 - {compareResult.file1.originalName}</span>
+              <Tag color="blue">v{compareResult.file1.version}</Tag>
+              <span style={{ color: '#999' }}>→</span>
+              <Tag color="green">v{compareResult.file2.version}</Tag>
+              {!compareResult.isTextFile && <Tag color="orange">仅元数据对比</Tag>}
+            </Space>
+          ) : '版本对比'
+        }
+        open={compareModalVisible}
+        onCancel={() => setCompareModalVisible(false)}
+        width={960}
+        footer={
+          compareResult ? (
+            <Space>
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={() => window.open(getDownloadUrl(compareResult.file1.id))}
+              >
+                下载 v{compareResult.file1.version}
+              </Button>
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                onClick={() => window.open(getDownloadUrl(compareResult.file2.id))}
+              >
+                下载 v{compareResult.file2.version}
+              </Button>
+              <Button onClick={() => setCompareModalVisible(false)}>
+                关闭
+              </Button>
+            </Space>
+          ) : (
+            <Button onClick={() => setCompareModalVisible(false)}>关闭</Button>
+          )
+        }
+      >
+        {compareResult && (
+          <div>
+            <Alert
+              type={compareResult.hasDifferences ? 'warning' : 'success'}
+              showIcon
+              icon={compareResult.hasDifferences ? <ExclamationCircleOutlined /> : <CheckCircleOutlined />}
+              message={
+                compareResult.hasDifferences
+                  ? `发现 ${compareResult.diffs.filter(diff => diff.changed).length} 处元数据差异`
+                  : '两个版本的元数据完全一致'
+              }
+              description={
+                <Space wrap>
+                  {compareResult.diffs.filter(diff => diff.changed).map(diff => (
+                    <Tag key={diff.field} color="red">{diff.label}</Tag>
+                  ))}
+                </Space>
+              }
+              style={{ marginBottom: 16 }}
+            />
+
+            <Row gutter={16} style={{ marginBottom: 20 }}>
+              <Col span={12}>
+                <Card
+                  size="small"
+                  title={
+                    <Space>
+                      <Tag color="blue">v{compareResult.file1.version}</Tag>
+                      <span>旧版本</span>
+                      {compareResult.file1.isCurrent && <Tag color="success">当前版本</Tag>}
+                    </Space>
+                  }
+                  style={{ borderColor: '#91caff' }}
+                >
+                  <Descriptions column={1} size="small">
+                    <Descriptions.Item label="上传人">
+                      {compareResult.file1.uploadedByName || <span style={{ color: '#bfbfbf' }}>未知</span>}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="上传时间">
+                      {dayjs(compareResult.file1.createdAt).format('YYYY-MM-DD HH:mm:ss')}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="文件大小">
+                      {formatFileSize(compareResult.file1.fileSize)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="版本说明">
+                      {compareResult.file1.versionNote || <span style={{ color: '#bfbfbf' }}>无</span>}
+                    </Descriptions.Item>
+                  </Descriptions>
+                </Card>
+              </Col>
+              <Col span={12}>
+                <Card
+                  size="small"
+                  title={
+                    <Space>
+                      <Tag color="green">v{compareResult.file2.version}</Tag>
+                      <span>新版本</span>
+                      {compareResult.file2.isCurrent && <Tag color="success">当前版本</Tag>}
+                    </Space>
+                  }
+                  style={{ borderColor: '#95de64' }}
+                >
+                  <Descriptions column={1} size="small">
+                    <Descriptions.Item label="上传人">
+                      {compareResult.file2.uploadedByName || <span style={{ color: '#bfbfbf' }}>未知</span>}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="上传时间">
+                      {dayjs(compareResult.file2.createdAt).format('YYYY-MM-DD HH:mm:ss')}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="文件大小">
+                      {formatFileSize(compareResult.file2.fileSize)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="版本说明">
+                      {compareResult.file2.versionNote || <span style={{ color: '#bfbfbf' }}>无</span>}
+                    </Descriptions.Item>
+                  </Descriptions>
+                </Card>
+              </Col>
+            </Row>
+
+            <Divider style={{ margin: '12px 0 16px' }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>
+                <DiffOutlined style={{ marginRight: 6 }} />
+                差异详情摘要
+              </span>
+            </Divider>
+
+            <div style={{ border: '1px solid #e8e8e8', borderRadius: 8, overflow: 'hidden' }}>
+              <Row
+                style={{
+                  background: '#f5f5f5',
+                  padding: '12px 16px',
+                  fontWeight: 600,
+                  borderBottom: '1px solid #e8e8e8',
+                }}
+              >
+                <Col span={5}>对比项</Col>
+                <Col span={7}>v{compareResult.file1.version}</Col>
+                <Col span={1} style={{ textAlign: 'center' }}> </Col>
+                <Col span={7}>v{compareResult.file2.version}</Col>
+                <Col span={4} style={{ textAlign: 'center' }}>结果</Col>
+              </Row>
+              {compareResult.diffs.map(diff => (
+                <Row
+                  key={diff.field}
+                  style={{
+                    padding: '14px 16px',
+                    borderBottom: '1px solid #f0f0f0',
+                    background: diff.changed ? '#fffbe6' : '#fff',
+                  }}
+                >
+                  <Col span={5} style={{ fontWeight: 500 }}>{diff.label}</Col>
+                  <Col span={7} style={{ color: diff.changed ? '#cf1322' : undefined }}>
+                    {renderDiffValue(diff.field, diff.oldValue)}
+                  </Col>
+                  <Col span={1} style={{ textAlign: 'center', color: '#bfbfbf' }}>
+                    {diff.changed ? '→' : '='}
+                  </Col>
+                  <Col span={7} style={{ color: diff.changed ? '#389e0d' : undefined }}>
+                    {renderDiffValue(diff.field, diff.newValue)}
+                  </Col>
+                  <Col span={4} style={{ textAlign: 'center' }}>
+                    {diff.changed ? (
+                      <Tag color="red" icon={<CloseCircleOutlined />}>有差异</Tag>
+                    ) : (
+                      <Tag color="green" icon={<CheckCircleOutlined />}>一致</Tag>
+                    )}
+                  </Col>
+                </Row>
+              ))}
+            </div>
+
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginTop: 16 }}
+              message={compareResult.isTextFile ? '文本文件提示' : '非文本文件提示'}
+              description={
+                compareResult.isTextFile
+                  ? '当前页面展示元数据差异摘要。如需对比文件内容，请下载两个版本后使用文本对比工具查看。'
+                  : '该文件类型为非文本文件，仅展示上传时间、上传人、版本说明、文件大小和当前版本标记等元数据差异。'
+              }
+            />
+          </div>
         )}
       </Modal>
 

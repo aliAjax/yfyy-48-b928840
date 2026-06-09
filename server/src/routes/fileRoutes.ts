@@ -13,6 +13,7 @@ import {
   listAllFilesByApplication,
   canDeleteFile,
   getVersionCount,
+  compareFileVersions,
 } from '../dao/fileDao';
 import { findApplicationById } from '../dao/applicationDao';
 
@@ -164,6 +165,42 @@ router.get('/versions/:applicationId', authMiddleware, (req: AuthRequest, res) =
 
   const versions = listFileVersions(applicationId, decodeURIComponent(originalName));
   res.json({ success: true, data: versions });
+});
+
+router.get('/compare/:applicationId', authMiddleware, (req: AuthRequest, res) => {
+  if (!req.user) return;
+
+  const { applicationId } = req.params;
+  const { file1Id, file2Id } = req.query;
+
+  const app = findApplicationById(applicationId);
+  if (!app) {
+    res.json({ success: false, message: '申请不存在' });
+    return;
+  }
+
+  if (!canViewApplication(app.applicantId, req.user.id, req.user.role)) {
+    res.status(403).json({ success: false, message: '无权查看' });
+    return;
+  }
+
+  if (!file1Id || !file2Id || typeof file1Id !== 'string' || typeof file2Id !== 'string') {
+    res.json({ success: false, message: '请提供两个文件ID进行对比' });
+    return;
+  }
+
+  if (file1Id === file2Id) {
+    res.json({ success: false, message: '请选择两个不同版本进行对比' });
+    return;
+  }
+
+  const result = compareFileVersions(applicationId, file1Id, file2Id);
+  if (!result) {
+    res.json({ success: false, message: '文件不存在或不属于同一材料' });
+    return;
+  }
+
+  res.json({ success: true, data: result });
 });
 
 router.get('/download/:id', authMiddleware, (req: AuthRequest, res) => {
