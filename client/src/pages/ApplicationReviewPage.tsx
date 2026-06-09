@@ -1,9 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider, Steps, Tooltip, Modal, Table, Collapse, Empty } from 'antd';
-import { ArrowLeftOutlined, FileTextOutlined, UserOutlined, HistoryOutlined, DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SaveOutlined, CheckOutlined, CloseOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Tag, Button, Space, List, Form, Input, Radio, message, Divider, Steps, Tooltip, Modal, Table, Collapse, Empty, Alert } from 'antd';
+import { ArrowLeftOutlined, FileTextOutlined, UserOutlined, HistoryOutlined, DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SaveOutlined, CheckOutlined, CloseOutlined, FolderOpenOutlined, SyncOutlined, WarningOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, reviewApplication, getReviewOpinions, saveReviewOpinions } from '../api/applicationApi';
-import { Application, FlowStep, MaterialFile, ReviewOpinionFormData, ReviewOpinion, MatterMaterial } from '../types';
+import { Application, FlowStep, MaterialFile, ReviewOpinionFormData, ReviewOpinion, MatterMaterial, MaterialSupplementStatus } from '../types';
 import { statusLabels, statusColors, formatFileSize, safeJSONParse, parseFlowConfig, roleLabels } from '../utils/common';
 import { getDownloadUrl, listFileVersions } from '../api/fileApi';
 import { getMatter } from '../api/matterApi';
@@ -167,16 +167,43 @@ export default function ApplicationReviewPage() {
       }
 
       const hasProblem = formData.some(item => item.status === 'problem');
-      if (values.result === 'pass' && hasProblem) {
-        Modal.confirm({
+      const confirmMessages: Record<string, { title: string; content: string }> = {
+        pass: {
           title: '确认审核通过？',
-          content: '部分材料标记为"存在问题"，但您选择了"审核通过"。是否继续？',
-          okText: '确认通过',
-          okButtonProps: { danger: true },
-          cancelText: '返回修改',
-          onOk: () => doSubmit(values),
-        });
-        return;
+          content: hasProblem 
+            ? '部分材料标记为"存在问题"，但您选择了"审核通过"。是否继续？'
+            : '确认将此申请审核通过？',
+        },
+        supplement: {
+          title: '确认要求继续补正？',
+          content: hasProblem 
+            ? '将此申请打回要求申请人继续补正材料。申请人重新提交后将进入下一轮复审。是否继续？'
+            : '您未标记任何问题材料，但选择了"要求补正"。是否仍要求申请人补正？',
+        },
+        reject: {
+          title: '确认退回申请？',
+          content: '申请退回后流程终止，无法再恢复。请确认是否要退回此申请？',
+        },
+      };
+
+      const confirmInfo = confirmMessages[values.result];
+      if (confirmInfo) {
+        const needConfirm = 
+          (values.result === 'pass' && hasProblem) ||
+          values.result === 'supplement' ||
+          values.result === 'reject';
+          
+        if (needConfirm) {
+          Modal.confirm({
+            title: confirmInfo.title,
+            content: confirmInfo.content,
+            okText: values.result === 'reject' ? '确认退回' : (values.result === 'supplement' ? '确认补正' : '确认通过'),
+            okButtonProps: values.result !== 'pass' ? { danger: true } : undefined,
+            cancelText: '返回修改',
+            onOk: () => doSubmit(values),
+          });
+          return;
+        }
       }
 
       doSubmit(values);
@@ -188,13 +215,18 @@ export default function ApplicationReviewPage() {
     setSubmitting(true);
     try {
       const res = await reviewApplication(id!, {
-        pass: values.result === 'pass',
+        result: values.result,
         opinion: values.opinion || '',
         reviewOpinions: formData,
       });
       
       if (res.success) {
-        message.success('审核完成');
+        const resultLabels: Record<string, string> = {
+          pass: '审核通过',
+          supplement: '已发送补正通知',
+          reject: '已退回申请',
+        };
+        message.success(resultLabels[values.result] || '审核完成');
         navigate(`/applications/${id}`);
       }
     } finally {
@@ -300,6 +332,45 @@ export default function ApplicationReviewPage() {
     return safeJSONParse<MatterMaterial[]>(matter.requiredMaterials, []);
   }, [matter]);
 
+  const isSupplementReview = useMemo(() => {
+    return !!application?.supplementReviewContext?.isSupplementReview;
+  }, [application]);
+
+  const supplementCount = useMemo(() => {
+    return application?.supplementCount || 0;
+  }, [application]);
+
+  const previousRound = useMemo(() => {
+    return application?.supplementReviewContext?.previousRound || 0;
+  }, [application]);
+
+  const materialSupplementStatusMap = useMemo(() => {
+    const map: Record<string, MaterialSupplementStatus> = {};
+    const statuses = application?.supplementReviewContext?.materialStatuses || [];
+    statuses.forEach(s => {
+      map[s.materialName] = s;
+    });
+    return map;
+  }, [application]);
+
+  const previousProblemMaterials = useMemo(() => {
+    return Object.values(materialSupplementStatusMap).filter(s => s.previousStatus === 'problem');
+  }, [materialSupplementStatusMap]);
+
+  const getMaterialHighlightType = (materialName: string, currentStatus: 'pass' | 'problem'): 'corrected' | 'stillProblem' | 'newProblem' | 'none' => {
+    const prevStatus = materialSupplementStatusMap[materialName];
+    if (!prevStatus) return 'none';
+    
+    if (prevStatus.previousStatus === 'problem') {
+      if (currentStatus === 'pass') return 'corrected';
+      return 'stillProblem';
+    }
+    if (prevStatus.previousStatus === 'pass' && currentStatus === 'problem') {
+      return 'newProblem';
+    }
+    return 'none';
+  };
+
   if (!application && !loading) {
     return <div style={{ textAlign: 'center', padding: 40 }}>申请不存在</div>;
   }
@@ -365,8 +436,50 @@ export default function ApplicationReviewPage() {
           <Descriptions.Item label="受理时间">
             {application?.acceptTime ? dayjs(application.acceptTime).format('YYYY-MM-DD HH:mm') : '-'}
           </Descriptions.Item>
+          {isSupplementReview && (
+            <Descriptions.Item label="补正次数" span={2}>
+              <Tag color="orange" icon={<SyncOutlined />}>
+                第 {supplementCount} 次补正复审（对应第 {previousRound} 轮审查意见）
+              </Tag>
+            </Descriptions.Item>
+          )}
         </Descriptions>
       </Card>
+
+      {isSupplementReview && previousProblemMaterials.length > 0 && (
+        <Alert
+          message={
+            <Space>
+              <WarningOutlined />
+              <strong>补正后复审提示</strong>
+              <span style={{ color: '#666' }}>
+                本次为申请人补正材料后的第 {supplementCount} 次复审，上一轮共指出 {previousProblemMaterials.length} 项问题，请重点核查补正情况。
+              </span>
+            </Space>
+          }
+          description={
+            <Space wrap size={[8, 4]} style={{ marginTop: 8 }}>
+              {previousProblemMaterials.map(p => {
+                const currentItem = formData.find(f => f.materialName === p.materialName);
+                const isCorrected = currentItem?.status === 'pass';
+                return (
+                  <Tag
+                    key={p.materialName}
+                    icon={isCorrected ? <CheckCircleOutlined /> : <ExclamationCircleOutlined />}
+                    color={isCorrected ? 'success' : 'warning'}
+                    style={{ fontSize: 13, padding: '4px 10px' }}
+                  >
+                    {p.materialName}：{isCorrected ? '已补正' : '待确认'}
+                  </Tag>
+                );
+              })}
+            </Space>
+          }
+          type="warning"
+          showIcon={false}
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
       <Card title="申请信息" style={{ marginBottom: 16 }}>
         {Object.keys(basicInfo).length > 0 ? (
@@ -558,6 +671,16 @@ export default function ApplicationReviewPage() {
             <Tag color="green">通过 {passCount} 项</Tag>
             <Tag color="orange">存在问题 {problemCount} 项</Tag>
             <Tag color="blue">共 {formData.length} 项</Tag>
+            {isSupplementReview && (
+              <>
+                <Tag color="success" icon={<CheckCircleOutlined />}>
+                  已补正 {formData.filter(i => getMaterialHighlightType(i.materialName, i.status) === 'corrected').length} 项
+                </Tag>
+                <Tag color="warning" icon={<ExclamationCircleOutlined />}>
+                  待处理 {formData.filter(i => getMaterialHighlightType(i.materialName, i.status) === 'stillProblem').length} 项
+                </Tag>
+              </>
+            )}
           </Space>
         }
         style={{ marginBottom: 16 }}
@@ -595,14 +718,50 @@ export default function ApplicationReviewPage() {
             {formData.map((item, idx) => {
               const materialFiles = getFilesForMaterial(item.materialName);
               const materialInfo = matterMaterials.find(m => m.name === item.materialName);
+              const highlightType = getMaterialHighlightType(item.materialName, item.status);
+              const prevStatus = materialSupplementStatusMap[item.materialName];
+
+              let borderColor = 'transparent';
+              let bgColor = item.status === 'pass' ? '#f6ffed' : '#fff7e6';
+              let highlightTag: JSX.Element | null = null;
+
+              if (isSupplementReview && prevStatus) {
+                if (highlightType === 'corrected') {
+                  borderColor = '#52c41a';
+                  bgColor = '#f6ffed';
+                  highlightTag = (
+                    <Tag color="success" icon={<CheckCircleOutlined />} style={{ marginLeft: 8 }}>
+                      已补正
+                    </Tag>
+                  );
+                } else if (highlightType === 'stillProblem') {
+                  borderColor = '#faad14';
+                  bgColor = '#fffbe6';
+                  highlightTag = (
+                    <Tag color="warning" icon={<ExclamationCircleOutlined />} style={{ marginLeft: 8 }}>
+                      仍需补正
+                    </Tag>
+                  );
+                } else if (highlightType === 'newProblem') {
+                  borderColor = '#ff4d4f';
+                  bgColor = '#fff1f0';
+                  highlightTag = (
+                    <Tag color="error" icon={<CloseCircleOutlined />} style={{ marginLeft: 8 }}>
+                      新发现问题
+                    </Tag>
+                  );
+                }
+              }
+
               return (
                 <div
                   key={item.materialName}
                   style={{
                     padding: '20px',
                     borderBottom: idx < formData.length - 1 ? '1px solid #f0f0f0' : 'none',
-                    background: item.status === 'pass' ? '#f6ffed' : '#fff7e6',
-                    transition: 'background 0.3s',
+                    background: bgColor,
+                    borderLeft: `4px solid ${borderColor}`,
+                    transition: 'background 0.3s, border-left-color 0.3s',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
@@ -619,6 +778,7 @@ export default function ApplicationReviewPage() {
                           {materialInfo?.required && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}
                           {item.materialName}
                         </strong>
+                        {highlightTag}
                         <Radio.Group
                           value={item.status}
                           onChange={(e) => handleStatusChange(item.materialName, e.target.value)}
@@ -635,6 +795,36 @@ export default function ApplicationReviewPage() {
                           {item.status === 'pass' ? '材料合规' : '需修改'}
                         </Tag>
                       </div>
+
+                      {prevStatus && prevStatus.previousStatus === 'problem' && (
+                        <div
+                          style={{
+                            marginBottom: 12,
+                            padding: '10px 14px',
+                            background: highlightType === 'corrected' ? 'rgba(82, 196, 26, 0.08)' : 'rgba(250, 173, 20, 0.08)',
+                            borderRadius: 6,
+                            border: `1px dashed ${highlightType === 'corrected' ? '#b7eb8f' : '#ffe58f'}`,
+                          }}
+                        >
+                          <Space align="start" style={{ width: '100%' }}>
+                            <HistoryOutlined style={{ color: highlightType === 'corrected' ? '#52c41a' : '#faad14', marginTop: 2 }} />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
+                                <strong>上一轮审查意见（第 {previousRound} 轮）：</strong>
+                              </div>
+                              <div style={{ color: '#333', lineHeight: 1.6 }}>
+                                {prevStatus.previousOpinion || <span style={{ color: '#999' }}>（无具体意见）</span>}
+                              </div>
+                              {prevStatus.hasNewVersion && (
+                                <div style={{ marginTop: 6, fontSize: 12, color: '#1890ff' }}>
+                                  <SyncOutlined style={{ marginRight: 4 }} />
+                                  申请人已上传新版本文件
+                                </div>
+                              )}
+                            </div>
+                          </Space>
+                        </div>
+                      )}
 
                       {materialInfo?.description && (
                         <div style={{ color: '#999', fontSize: 13, marginBottom: 12, padding: '8px 12px', background: 'rgba(0,0,0,0.02)', borderRadius: 4 }}>
@@ -783,23 +973,47 @@ export default function ApplicationReviewPage() {
                 <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} /> 
                 <span style={{ fontSize: 15, fontWeight: 500 }}>审核通过</span>
               </Radio>
+              <Radio value="supplement" style={{ padding: '8px 24px' }}>
+                <SyncOutlined style={{ color: '#faad14', fontSize: 18 }} /> 
+                <span style={{ fontSize: 15, fontWeight: 500 }}>要求补正</span>
+              </Radio>
               <Radio value="reject" style={{ padding: '8px 24px' }}>
                 <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} /> 
-                <span style={{ fontSize: 15, fontWeight: 500 }}>审核不通过</span>
+                <span style={{ fontSize: 15, fontWeight: 500 }}>退回申请</span>
               </Radio>
             </Radio.Group>
           </Form.Item>
           <Form.Item
-            label="总体审核意见"
-            name="opinion"
-            rules={[{ required: true, message: '请填写总体审核意见' }]}
+            noStyle
+            shouldUpdate={(prev: any, curr: any) => prev.result !== curr.result}
           >
-            <TextArea 
-              rows={4} 
-              placeholder="请填写总体审核意见，系统将自动汇总各材料的审查意见附在下方" 
-              showCount
-              maxLength={1000}
-            />
+            {({ getFieldValue }) => {
+              const result = getFieldValue('result');
+              const placeholders: Record<string, string> = {
+                pass: '请填写总体审核意见，系统将自动汇总各材料的审查意见附在下方',
+                supplement: '请详细填写需要补正的内容和要求，系统将通知申请人按此意见补正材料',
+                reject: '请填写退回原因，说明申请不符合要求的具体情况',
+              };
+              const opinionLabels: Record<string, string> = {
+                pass: '总体审核意见',
+                supplement: '补正要求',
+                reject: '退回原因',
+              };
+              return (
+                <Form.Item
+                  label={opinionLabels[result] || '总体审核意见'}
+                  name="opinion"
+                  rules={[{ required: true, message: result === 'pass' ? '请填写总体审核意见' : result === 'supplement' ? '请填写补正要求' : '请填写退回原因' }]}
+                >
+                  <TextArea 
+                    rows={4} 
+                    placeholder={placeholders[result] || placeholders.pass}
+                    showCount
+                    maxLength={1000}
+                  />
+                </Form.Item>
+              );
+            }}
           </Form.Item>
           <div style={{ background: '#f5f5f5', padding: '12px 16px', borderRadius: 6, marginBottom: 16 }}>
             <div style={{ color: '#999', fontSize: 12, marginBottom: 6 }}>
@@ -807,7 +1021,23 @@ export default function ApplicationReviewPage() {
             </div>
             <div style={{ color: '#666', fontSize: 13 }}>
               当前材料审查结果：通过 {passCount} 项，存在问题 {problemCount} 项
+              {isSupplementReview && (
+                <>
+                  {formData.filter(i => getMaterialHighlightType(i.materialName, i.status) === 'corrected').length > 0 && (
+                    <> ｜ 已补正 {formData.filter(i => getMaterialHighlightType(i.materialName, i.status) === 'corrected').length} 项</>
+                  )}
+                  {formData.filter(i => getMaterialHighlightType(i.materialName, i.status) === 'stillProblem').length > 0 && (
+                    <> ｜ 待处理 {formData.filter(i => getMaterialHighlightType(i.materialName, i.status) === 'stillProblem').length} 项</>
+                  )}
+                </>
+              )}
             </div>
+            {isSupplementReview && (
+              <div style={{ color: '#faad14', fontSize: 12, marginTop: 6 }}>
+                <WarningOutlined style={{ marginRight: 4 }} />
+                本次为补正后第 {supplementCount} 次复审，选择"要求补正"将生成新一轮审查意见并通知申请人继续补正。
+              </div>
+            )}
           </div>
           <Form.Item>
             <Space size="large">

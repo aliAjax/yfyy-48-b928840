@@ -103,6 +103,8 @@ export interface Application {
   matterWarningDays?: number;
   matterExcludeSupplementTime?: boolean;
   flowSteps?: FlowStep[];
+  supplementReviewContext?: SupplementReviewContext;
+  supplementCount?: number;
 }
 
 export interface OperationLog {
@@ -119,8 +121,10 @@ export interface OperationLog {
 
 export type NotificationType = 
   | 'submit' 
+  | 'resubmit'
   | 'accept' 
   | 'supplement' 
+  | 'review_supplement'
   | 'reject' 
   | 'review_pass'
   | 'review_reject'
@@ -295,4 +299,22 @@ export interface ReviewOpinionFormData {
   materialName: string;
   status: ReviewOpinionStatus;
   opinion: string;
+}
+
+export type ReviewResult = 'pass' | 'supplement' | 'reject';
+
+export interface MaterialSupplementStatus {
+  materialName: string;
+  previousStatus: ReviewOpinionStatus;
+  previousOpinion: string;
+  isCorrected: boolean;
+  currentRemark?: string;
+  hasNewVersion: boolean;
+}
+
+export interface SupplementReviewContext {
+  isSupplementReview: boolean;
+  previousRound: number;
+  supplementCount: number;
+  materialStatuses: MaterialSupplementStatus[];
 }

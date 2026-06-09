@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Card, Descriptions, Tag, Timeline, Button, Space, List, Modal, message, Input, Upload, Steps, Tooltip, Table, Popconfirm, Collapse } from 'antd';
-import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, UserOutlined, HistoryOutlined, ExclamationCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, UserOutlined, HistoryOutlined, ExclamationCircleOutlined, ClockCircleOutlined, SyncOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, getApplicationLogs, submitApplication, acceptApplication, supplementApplication, rejectApplication, sendReviewApplication, completeApplication, reviewApplication } from '../api/applicationApi';
 import { warningLabels, warningColors, parseFlowConfig, roleLabels, DEFAULT_FLOW_STEPS, canOperateStep } from '../utils/common';
@@ -773,6 +773,13 @@ export default function ApplicationDetailPage() {
           <Descriptions.Item label="办结时间">
             {application?.completeTime ? dayjs(application.completeTime).format('YYYY-MM-DD HH:mm') : '-'}
           </Descriptions.Item>
+          {(application?.supplementCount ?? 0) > 0 && (
+            <Descriptions.Item label="补正次数">
+              <Tag color="orange" icon={<SyncOutlined />}>
+                {application?.supplementCount} 次补正复审
+              </Tag>
+            </Descriptions.Item>
+          )}
           {application?.supplementReason && (
             <Descriptions.Item label="补正原因" span={2}>
               <span style={{ color: '#faad14' }}>{application.supplementReason}</span>

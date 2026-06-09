@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Card, Form, Input, Button, Space, message, Upload, List, Divider, Checkbox, Tag, Modal, Select, Table, Tooltip, Popconfirm } from 'antd';
-import { ArrowLeftOutlined, UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined, SendOutlined, CheckCircleOutlined, CloseCircleOutlined, CopyOutlined, HistoryOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Card, Form, Input, Button, Space, message, Upload, List, Divider, Checkbox, Tag, Modal, Select, Table, Tooltip, Popconfirm, Alert, Collapse } from 'antd';
+import { ArrowLeftOutlined, UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined, SendOutlined, CheckCircleOutlined, CloseCircleOutlined, CopyOutlined, HistoryOutlined, DownloadOutlined, ExclamationCircleOutlined, WarningOutlined, SyncOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApplication, updateApplication, submitApplication } from '../api/applicationApi';
 import { getMatter } from '../api/matterApi';
 import { listTemplates, createTemplate, getTemplate } from '../api/templateApi';
-import { Application, Matter, ApplicationMaterial, MatterMaterial, ApplicationTemplate, MaterialFile } from '../types';
+import { Application, Matter, ApplicationMaterial, MatterMaterial, ApplicationTemplate, MaterialFile, ReviewOpinion } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { safeJSONParse, formatFileSize } from '../utils/common';
 import { uploadFile, deleteFile, getDownloadUrl, listFileVersions } from '../api/fileApi';
@@ -286,6 +286,25 @@ export default function ApplicationEditPage() {
   const requiredCount = useMemo(() => materials.filter(m => m.required).length, [materials]);
   const requiredCheckedCount = useMemo(() => materials.filter(m => m.required && m.checked).length, [materials]);
 
+  const isSupplement = application?.status === 'supplement';
+  const supplementCount = application?.supplementCount || 0;
+
+  const lastRoundProblemOpinions = useMemo((): ReviewOpinion[] => {
+    if (!isSupplement) return [];
+    const opinions = application?.reviewOpinions || [];
+    if (opinions.length === 0) return [];
+    const maxRound = Math.max(...opinions.map(o => o.reviewRound));
+    return opinions.filter(o => o.reviewRound === maxRound && o.status === 'problem');
+  }, [application, isSupplement]);
+
+  const materialProblemMap = useMemo(() => {
+    const map: Record<string, ReviewOpinion> = {};
+    lastRoundProblemOpinions.forEach(op => {
+      map[op.materialName] = op;
+    });
+    return map;
+  }, [lastRoundProblemOpinions]);
+
   if (!application && !loading) {
     return <div style={{ textAlign: 'center', padding: 40 }}>申请不存在</div>;
   }
@@ -315,12 +334,70 @@ export default function ApplicationEditPage() {
           <div><strong>申请编号：</strong>{application?.applicationNo}</div>
           <div><strong>办理部门：</strong>{matter?.department}</div>
           <div><strong>承诺办结时限：</strong>{matter?.promiseDays} 个工作日</div>
+          {isSupplement && (
+            <div style={{ marginTop: 8 }}>
+              <Tag color="orange" icon={<SyncOutlined />} style={{ fontSize: 13 }}>
+                第 {supplementCount > 0 ? supplementCount : 1} 次补正
+              </Tag>
+            </div>
+          )}
           {application?.supplementReason && (
             <div style={{ marginTop: 8, color: '#faad14' }}>
               <strong>补正要求：</strong>{application.supplementReason}
             </div>
           )}
         </div>
+
+        {isSupplement && lastRoundProblemOpinions.length > 0 && (
+          <Alert
+            message={
+              <Space align="start">
+                <WarningOutlined style={{ marginTop: 2 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 8 }}>
+                    <strong>请按以下要求补正材料（共 {lastRoundProblemOpinions.length} 项问题）：</strong>
+                  </div>
+                  <Collapse
+                    ghost
+                    size="small"
+                    items={lastRoundProblemOpinions.map((op, idx) => ({
+                      key: op.id,
+                      label: (
+                        <Space>
+                          <ExclamationCircleOutlined style={{ color: '#faad14' }} />
+                          <span style={{ fontWeight: 500 }}>
+                            {idx + 1}. {op.materialName}
+                          </span>
+                          {materials.find(m => m.name === op.materialName)?.checked && (
+                            <Tag color="success" icon={<CheckCircleOutlined />}>
+                              已准备
+                            </Tag>
+                          )}
+                        </Space>
+                      ),
+                      children: (
+                        <div style={{ padding: '8px 12px', background: '#fff7e6', borderRadius: 4, borderLeft: '3px solid #faad14' }}>
+                          <div style={{ color: '#666', fontSize: 13 }}>
+                            <strong>审查意见：</strong>
+                            {op.opinion || <span style={{ color: '#999' }}>（无具体意见）</span>}
+                          </div>
+                          {op.reviewerName && (
+                            <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>
+                              审查人：{op.reviewerName} · {dayjs(op.createdAt).format('YYYY-MM-DD HH:mm')}
+                            </div>
+                          )}
+                        </div>
+                      ),
+                    }))}
+                  />
+                </div>
+              </Space>
+            }
+            type="warning"
+            showIcon={false}
+            style={{ marginBottom: 16 }}
+          />
+        )}
 
         <Divider orientation="left">基本信息</Divider>
 

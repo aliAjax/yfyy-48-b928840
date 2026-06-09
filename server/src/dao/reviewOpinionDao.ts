@@ -137,3 +137,28 @@ export function deleteReviewOpinionsByApplication(applicationId: string): boolea
   const result = db.prepare('DELETE FROM review_opinions WHERE application_id = ?').run(applicationId);
   return result.changes > 0;
 }
+
+export function listProblemOpinionsByRound(applicationId: string, reviewRound: number): ReviewOpinion[] {
+  const rows = db.prepare(
+    "SELECT * FROM review_opinions WHERE application_id = ? AND review_round = ? AND status = 'problem' ORDER BY created_at DESC, id DESC"
+  ).all(applicationId, reviewRound) as RawReviewOpinion[];
+  return rows.map(mapReviewOpinion);
+}
+
+export function getLatestProblemOpinions(applicationId: string): ReviewOpinion[] {
+  const maxRound = getMaxReviewRound(applicationId);
+  if (maxRound === 0) return [];
+  return listProblemOpinionsByRound(applicationId, maxRound);
+}
+
+export function getReviewRounds(applicationId: string): number[] {
+  const rows = db.prepare(
+    'SELECT DISTINCT review_round FROM review_opinions WHERE application_id = ? ORDER BY review_round DESC'
+  ).all(applicationId) as { review_round: number }[];
+  return rows.map(r => r.review_round);
+}
+
+export function countSupplementRounds(applicationId: string): number {
+  const maxRound = getMaxReviewRound(applicationId);
+  return Math.max(0, maxRound - 1);
+}

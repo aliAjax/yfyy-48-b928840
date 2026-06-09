@@ -52,7 +52,8 @@ export function sendReviewApplication(id: string): Promise<ApiResponse<Applicati
 }
 
 export function reviewApplication(id: string, data: {
-  pass: boolean;
+  pass?: boolean;
+  result?: 'pass' | 'supplement' | 'reject';
   opinion: string;
   reviewOpinions?: ReviewOpinionFormData[];
 }): Promise<ApiResponse<Application>> {

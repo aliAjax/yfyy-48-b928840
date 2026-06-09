@@ -50,11 +50,13 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   res.status(500).json({ success: false, message: '服务器内部错误' });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 行政审批系统已启动: http://localhost:${PORT}`);
-  if (NODE_ENV === 'production' && fs.existsSync(clientDistPath)) {
-    console.log(`📦 生产模式：前端静态资源已托管`);
-  }
-});
+if (NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`🚀 行政审批系统已启动: http://localhost:${PORT}`);
+    if (NODE_ENV === 'production' && fs.existsSync(clientDistPath)) {
+      console.log(`📦 生产模式：前端静态资源已托管`);
+    }
+  });
+}
 
 export default app;

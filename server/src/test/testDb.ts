@@ -1,65 +1,29 @@
 import Database, { type Database as DatabaseType } from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
 
-function createDatabase(): DatabaseType {
-  let db: DatabaseType;
+let testDb: DatabaseType;
 
-  if (process.env.NODE_ENV === 'test') {
-    db = new Database(':memory:');
-  } else {
-    const dbDir = path.join(__dirname, '../../data');
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
-    const dbPath = path.join(dbDir, 'approval.db');
-    db = new Database(dbPath);
+export function getTestDb(): DatabaseType {
+  if (!testDb) {
+    testDb = new Database(':memory:');
+    testDb.pragma('journal_mode = WAL');
+    testDb.pragma('foreign_keys = ON');
+    initTestDb(testDb);
   }
-
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  return db;
+  return testDb;
 }
 
-const db: DatabaseType = createDatabase();
-
-function migrateDatabase(database: DatabaseType = db) {
-  const fileColumns = database.prepare("PRAGMA table_info(material_files)").all() as { name: string }[];
-  const fileColNames = fileColumns.map(c => c.name);
-  
-  if (!fileColNames.includes('version')) {
-    database.exec("ALTER TABLE material_files ADD COLUMN version INTEGER NOT NULL DEFAULT 1");
+export function resetTestDb(): void {
+  if (testDb) {
+    testDb.close();
   }
-  if (!fileColNames.includes('is_current')) {
-    database.exec("ALTER TABLE material_files ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1");
-  }
-  if (!fileColNames.includes('version_note')) {
-    database.exec("ALTER TABLE material_files ADD COLUMN version_note TEXT");
-  }
-  if (!fileColNames.includes('uploader_name')) {
-    database.exec("ALTER TABLE material_files ADD COLUMN uploader_name TEXT");
-  }
-
-  const opinionColumns = database.prepare("PRAGMA table_info(review_opinions)").all() as { name: string }[];
-  const opinionColNames = opinionColumns.map(c => c.name);
-  
-  if (!opinionColNames.includes('updated_at')) {
-    database.exec("ALTER TABLE review_opinions ADD COLUMN updated_at TEXT");
-  }
-
-  const matterColumns = database.prepare("PRAGMA table_info(matters)").all() as { name: string }[];
-  const matterColNames = matterColumns.map(c => c.name);
-  
-  if (!matterColNames.includes('warning_days')) {
-    database.exec("ALTER TABLE matters ADD COLUMN warning_days INTEGER");
-  }
-  if (!matterColNames.includes('exclude_supplement_time')) {
-    database.exec("ALTER TABLE matters ADD COLUMN exclude_supplement_time INTEGER NOT NULL DEFAULT 0");
-  }
+  testDb = new Database(':memory:');
+  testDb.pragma('journal_mode = WAL');
+  testDb.pragma('foreign_keys = ON');
+  initTestDb(testDb);
 }
 
-function initDatabase(database: DatabaseType = db) {
-  database.exec(`
+function initTestDb(db: DatabaseType): void {
+  db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -168,14 +132,6 @@ function initDatabase(database: DatabaseType = db) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    CREATE INDEX IF NOT EXISTS idx_templates_user ON application_templates(user_id);
-    CREATE INDEX IF NOT EXISTS idx_templates_matter ON application_templates(matter_id);
-
-    CREATE INDEX IF NOT EXISTS idx_applications_applicant ON applications(applicant_id);
-    CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
-    CREATE INDEX IF NOT EXISTS idx_applications_matter ON applications(matter_id);
-    CREATE INDEX IF NOT EXISTS idx_logs_application ON operation_logs(application_id);
-    CREATE INDEX IF NOT EXISTS idx_files_application ON material_files(application_id);
     CREATE TABLE IF NOT EXISTS review_opinions (
       id TEXT PRIMARY KEY,
       application_id TEXT NOT NULL,
@@ -191,6 +147,13 @@ function initDatabase(database: DatabaseType = db) {
       FOREIGN KEY (reviewer_id) REFERENCES users(id)
     );
 
+    CREATE INDEX IF NOT EXISTS idx_templates_user ON application_templates(user_id);
+    CREATE INDEX IF NOT EXISTS idx_templates_matter ON application_templates(matter_id);
+    CREATE INDEX IF NOT EXISTS idx_applications_applicant ON applications(applicant_id);
+    CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
+    CREATE INDEX IF NOT EXISTS idx_applications_matter ON applications(matter_id);
+    CREATE INDEX IF NOT EXISTS idx_logs_application ON operation_logs(application_id);
+    CREATE INDEX IF NOT EXISTS idx_files_application ON material_files(application_id);
     CREATE INDEX IF NOT EXISTS idx_review_opinions_application ON review_opinions(application_id);
     CREATE INDEX IF NOT EXISTS idx_review_opinions_round ON review_opinions(application_id, review_round);
     CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
@@ -198,7 +161,19 @@ function initDatabase(database: DatabaseType = db) {
   `);
 }
 
-initDatabase();
-migrateDatabase();
-
-export default db;
+export function clearAllTables(): void {
+  const db = getTestDb();
+  const tables = [
+    'review_opinions',
+    'operation_logs',
+    'notifications',
+    'material_files',
+    'applications',
+    'application_templates',
+    'matters',
+    'users',
+  ];
+  tables.forEach(table => {
+    db.exec(`DELETE FROM ${table}`);
+  });
+}

@@ -3,14 +3,64 @@ import { findApplicationById, listApplications, createApplication, updateApplica
 import { findMatterById } from '../dao/matterDao';
 import { findUserById, listUsers } from '../dao/userDao';
 import { createLog, listLogsByApplication } from '../dao/logDao';
-import { listCurrentFilesByApplication } from '../dao/fileDao';
+import { listCurrentFilesByApplication, listAllFilesByApplication, getVersionCount } from '../dao/fileDao';
 import { createNotification } from '../dao/notificationDao';
-import { listReviewOpinionsByApplication, batchCreateReviewOpinions, getMaxReviewRound } from '../dao/reviewOpinionDao';
+import { listReviewOpinionsByApplication, batchCreateReviewOpinions, getMaxReviewRound, getLatestProblemOpinions, countSupplementRounds, listReviewOpinionsByRound } from '../dao/reviewOpinionDao';
 import { authMiddleware, requireRole, AuthRequest } from '../middleware/auth';
-import { now, toJSON, calculateWarningStatus, calculateSupplementDays, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep } from '../utils/helpers';
-import { ApplicationStatus, WarningStatus, ReviewOpinionStatus } from '../types';
+import { now, toJSON, calculateWarningStatus, calculateSupplementDays, parseFlowConfig, getCurrentStepName, getStepByStatus, canOperateStep, parseJSON } from '../utils/helpers';
+import { ApplicationStatus, WarningStatus, ReviewOpinionStatus, SupplementReviewContext, MaterialSupplementStatus, ApplicationMaterial, MatterMaterial } from '../types';
 
 const router = Router();
+
+function buildSupplementReviewContext(app: any, matter: any): SupplementReviewContext | undefined {
+  const maxRound = getMaxReviewRound(app.id);
+  if (maxRound === 0) return undefined;
+
+  const supplementCount = countSupplementRounds(app.id);
+  if (supplementCount === 0) return undefined;
+
+  const isSupplementReview = ['submitted', 'accepted', 'reviewing', 'supplement'].includes(app.status);
+  if (!isSupplementReview) return undefined;
+
+  const previousRoundOpinions = listReviewOpinionsByRound(app.id, maxRound);
+  if (previousRoundOpinions.length === 0) return undefined;
+
+  const appMaterials = parseJSON<ApplicationMaterial[]>(app.materials, []);
+  const matterMaterials = parseJSON<MatterMaterial[]>(matter?.requiredMaterials, []);
+  const allFiles = listAllFilesByApplication(app.id);
+  const currentFiles = listCurrentFilesByApplication(app.id);
+
+  const materialStatuses: MaterialSupplementStatus[] = previousRoundOpinions.map(opinion => {
+    const appMat = appMaterials.find(m => m.name === opinion.materialName);
+    const relatedFiles = currentFiles.filter(f =>
+      f.originalName.includes(opinion.materialName) || opinion.materialName.includes(f.originalName.replace(/\.[^/.]+$/, ''))
+    );
+    const allRelatedFiles = allFiles.filter(f =>
+      f.originalName.includes(opinion.materialName) || opinion.materialName.includes(f.originalName.replace(/\.[^/.]+$/, ''))
+    );
+
+    const hasNewVersion = relatedFiles.some(f => {
+      const vCount = getVersionCount(app.id, f.originalName);
+      return vCount > 1;
+    }) || allRelatedFiles.length > 0;
+
+    return {
+      materialName: opinion.materialName,
+      previousStatus: opinion.status,
+      previousOpinion: opinion.opinion,
+      isCorrected: opinion.status === 'pass',
+      currentRemark: appMat?.remark,
+      hasNewVersion: hasNewVersion || (appMat?.checked ?? false),
+    };
+  });
+
+  return {
+    isSupplementReview: true,
+    previousRound: maxRound,
+    supplementCount,
+    materialStatuses,
+  };
+}
 
 function enrichApplication(app: any) {
   const matter = findMatterById(app.matterId);
@@ -32,6 +82,8 @@ function enrichApplication(app: any) {
   
   const flowSteps = parseFlowConfig(matter?.flowConfig);
   const currentStepName = app.currentStep || getCurrentStepName(flowSteps, app.status);
+  const supplementReviewContext = buildSupplementReviewContext(app, matter);
+  const supplementCount = countSupplementRounds(app.id);
   
   return {
     ...app,
@@ -46,6 +98,8 @@ function enrichApplication(app: any) {
     matterExcludeSupplementTime: matter?.excludeSupplementTime,
     flowSteps,
     currentStep: currentStepName,
+    supplementReviewContext,
+    supplementCount,
   };
 }
 
@@ -470,6 +524,8 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
   const matter = findMatterById(app.matterId);
   const flowSteps = parseFlowConfig(matter?.flowConfig);
   const currentStepName = getCurrentStepName(flowSteps, 'submitted');
+  const isResubmit = oldStatus === 'supplement';
+  const supplementRound = countSupplementRounds(app.id);
   
   app = updateApplication(app.id, {
     status: 'submitted',
@@ -482,18 +538,36 @@ router.post('/:id/submit', authMiddleware, requireRole('applicant'), (req: AuthR
   createLog({
     applicationId: app.id,
     userId: currentUser.id,
-    action: 'submit',
-    description: `提交申请，进入【${currentStepName}】环节`,
+    action: isResubmit ? 'resubmit' : 'submit',
+    description: isResubmit 
+      ? `补正后第 ${supplementRound + 1} 次重新提交申请，进入【${currentStepName}】环节`
+      : `提交申请，进入【${currentStepName}】环节`,
     oldStatus,
     newStatus: 'submitted',
   });
 
-  notifyStepUsers(flowSteps, 'submitted', {
-    type: 'submit',
-    title: '新申请待受理',
-    content: `申请人 ${currentUser.name} 提交了「${matter?.name || ''}」申请，请及时受理。`,
-    applicationId: app.id,
-  });
+  if (isResubmit) {
+    createNotification({
+      userId: app.applicantId,
+      type: 'resubmit',
+      title: '补正材料已重新提交',
+      content: `您的「${matter?.name || ''}」申请已完成第 ${supplementRound + 1} 次补正并重新提交，请等待审核。`,
+      applicationId: app.id,
+    });
+    notifyStepUsers(flowSteps, 'submitted', {
+      type: 'resubmit',
+      title: '补正材料待复审',
+      content: `申请人 ${currentUser.name} 对「${matter?.name || ''}」申请完成补正（第 ${supplementRound + 1} 次），请及时受理并复审。`,
+      applicationId: app.id,
+    });
+  } else {
+    notifyStepUsers(flowSteps, 'submitted', {
+      type: 'submit',
+      title: '新申请待受理',
+      content: `申请人 ${currentUser.name} 提交了「${matter?.name || ''}」申请，请及时受理。`,
+      applicationId: app.id,
+    });
+  }
 
   res.json({ success: true, data: enrichApplication(app), message: '提交成功' });
 });
@@ -920,7 +994,21 @@ router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
     return;
   }
 
-  const { opinion, pass, reviewOpinions } = req.body;
+  const { opinion, reviewOpinions } = req.body;
+  let { result, pass } = req.body;
+  
+  if (!result && pass !== undefined) {
+    result = pass ? 'pass' : 'reject';
+  }
+  if (!result) {
+    result = 'pass';
+  }
+
+  if (!['pass', 'supplement', 'reject'].includes(result)) {
+    res.json({ success: false, message: '审核结果参数无效' });
+    return;
+  }
+
   let app = findApplicationById(req.params.id);
   if (!app) {
     res.json({ success: false, message: '申请不存在' });
@@ -955,8 +1043,10 @@ router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
     }
   }
   
-  if (pass) {
+  if (result === 'pass') {
     const currentStepName = getStepName(flowSteps, 'approved');
+    const finalRound = getMaxReviewRound(appId);
+    const supplementCnt = countSupplementRounds(appId);
     
     app = updateApplication(appId, {
       status: 'approved',
@@ -965,30 +1055,71 @@ router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
       currentStep: currentStepName,
     })!;
 
+    const passDesc = supplementCnt > 0 
+      ? `经第 ${finalRound} 轮审查（共 ${supplementCnt} 次补正）后审核通过，进入【${currentStepName}】环节：${finalOpinion || ''}`
+      : `审核通过，进入【${currentStepName}】环节：${finalOpinion || ''}`;
+
     createLog({
       applicationId: appId,
       userId: req.user.id,
       action: 'review',
-      description: `审核通过，进入【${currentStepName}】环节：${finalOpinion || ''}`,
+      description: passDesc,
       oldStatus,
       newStatus: 'approved',
     });
 
+    const applicantNotifyContent = supplementCnt > 0
+      ? `您的「${matter?.name || ''}」申请经第 ${finalRound} 轮审查（共 ${supplementCnt} 次补正）后已审核通过，当前环节：${currentStepName}。`
+      : `您的「${matter?.name || ''}」申请已审核通过，当前环节：${currentStepName}。`;
+
     createNotification({
       userId: applicantId,
       type: 'review_pass',
-      title: '审核通过',
-      content: `您的「${matter?.name || ''}」申请已审核通过，当前环节：${currentStepName}。`,
+      title: supplementCnt > 0 ? '补正复审通过' : '审核通过',
+      content: applicantNotifyContent,
       applicationId: appId,
     });
     notifyStepUsers(flowSteps, 'approved', {
       type: 'review_pass',
-      title: '申请审核通过待办结',
-      content: `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时办结。`,
+      title: supplementCnt > 0 ? '补正复审通过待办结' : '申请审核通过待办结',
+      content: supplementCnt > 0
+        ? `「${matter?.name || ''}」申请经第 ${finalRound} 轮审查（${supplementCnt} 次补正）后通过，已进入【${currentStepName}】环节，请及时办结。`
+        : `「${matter?.name || ''}」申请已进入【${currentStepName}】环节，请及时办结。`,
+      applicationId: appId,
+    });
+  } else if (result === 'supplement') {
+    const currentStepName = getStepName(flowSteps, 'supplement');
+    const finalRound = getMaxReviewRound(appId);
+    const supplementCnt = countSupplementRounds(appId);
+
+    app = updateApplication(appId, {
+      status: 'supplement',
+      reviewOpinion: finalOpinion,
+      reviewerUserId: req.user.id,
+      supplementReason: finalOpinion,
+      currentStep: currentStepName,
+    })!;
+
+    createLog({
+      applicationId: appId,
+      userId: req.user.id,
+      action: 'review_supplement',
+      description: `第 ${finalRound} 轮审查后要求继续补正（第 ${supplementCnt} 次补正），进入【${currentStepName}】环节：${finalOpinion || ''}`,
+      oldStatus,
+      newStatus: 'supplement',
+    });
+
+    createNotification({
+      userId: applicantId,
+      type: 'review_supplement',
+      title: `第 ${supplementCnt} 次补正要求`,
+      content: `您的「${matter?.name || ''}」申请经第 ${finalRound} 轮审查后需要继续补正材料（第 ${supplementCnt} 次补正）：${finalOpinion || ''}，请按要求修改后重新提交。`,
       applicationId: appId,
     });
   } else {
     const currentStepName = getStepName(flowSteps, 'rejected');
+    const finalRound = getMaxReviewRound(appId);
+    const supplementCnt = countSupplementRounds(appId);
 
     app = updateApplication(appId, {
       status: 'rejected',
@@ -999,20 +1130,28 @@ router.post('/:id/review', authMiddleware, (req: AuthRequest, res) => {
       currentStep: currentStepName,
     })!;
 
+    const rejectDesc = supplementCnt > 0
+      ? `经第 ${finalRound} 轮审查（共 ${supplementCnt} 次补正）后审核不通过，进入【${currentStepName}】环节：${finalOpinion || ''}`
+      : `审核不通过，进入【${currentStepName}】环节：${finalOpinion || ''}`;
+
     createLog({
       applicationId: appId,
       userId: req.user.id,
       action: 'review',
-      description: `审核不通过，进入【${currentStepName}】环节：${finalOpinion || ''}`,
+      description: rejectDesc,
       oldStatus,
       newStatus: 'rejected',
     });
 
+    const rejectNotifyContent = supplementCnt > 0
+      ? `您的「${matter?.name || ''}」申请经第 ${finalRound} 轮审查（共 ${supplementCnt} 次补正）后审核不通过，原因：${finalOpinion || ''}`
+      : `您的「${matter?.name || ''}」申请审核不通过，原因：${finalOpinion || ''}`;
+
     createNotification({
       userId: applicantId,
       type: 'review_reject',
-      title: '审核不通过',
-      content: `您的「${matter?.name || ''}」申请审核不通过，原因：${finalOpinion || ''}`,
+      title: supplementCnt > 0 ? '补正复审不通过' : '审核不通过',
+      content: rejectNotifyContent,
       applicationId: appId,
     });
   }
